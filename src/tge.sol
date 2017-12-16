@@ -224,6 +224,6 @@ contract PrivateSale is Pausable, Destructible {
    * @dev Transfer all Ether held by the contract to the owner.
    */
   function escapeHatchTransferRemainingBalance() whenPaused external onlyOwner {
-    assert(owner.send(this.balance));
+    require(owner.send(this.balance));
   }
 }
