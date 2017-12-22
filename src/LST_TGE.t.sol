@@ -30,25 +30,16 @@ contract LST_TGE is DSTest {
         Whitelist = new ContributorWhitelist();
         // deploy LST
         LST = new LendroidSupportToken();
-        // confirm owner has 3.6b LST
-        assertEq(
-          LST.balanceOf(this),
-          3600000000000000000000000000
-        );
-        // TRANSFER 3.6B lST to ColdStorageWallet
-        LST.transfer(address(ColdStorageWallet),3600000000000000000000000000);
-        // confirm ColdStorageWallet has 3.6b lST
-        assertEq(
-          LST.balanceOf(address(ColdStorageWallet)),
-          3600000000000000000000000000
-        );
-        // confirm owner has 0 lST now
+        // confirm owner has 0 LST
         assertEq(
           LST.balanceOf(this),
           0
         );
-        // pause LST transfer
-        LST.pause();
+        // confirm ColdStorageWallet has 0 lST
+        assertEq(
+          LST.balanceOf(address(ColdStorageWallet)),
+          0
+        );
         // deploy PrivateSale contract
         Sale = new PrivateSale(
           address(LST),
@@ -89,7 +80,7 @@ contract LST_TGE is DSTest {
       );
       // buy LST for 1 ether as TestUser
       Sale.buyTokens.value(1 ether)(address(TestUser));
-      // Confirm 2,400 LST has been minted for TestUser
+      // Confirm 24,000 LST has been minted for TestUser
       assertEq(
         LST.balanceOf(address(TestUser)),
         24000000000000000000000

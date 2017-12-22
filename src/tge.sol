@@ -9,14 +9,13 @@ contract LendroidSupportToken is MintableToken, PausableToken {
   string public constant symbol = "LST";
   uint8 public constant decimals = 18;
 
-  uint256 public constant INITIAL_SUPPLY = 3600000000 * (10 ** uint256(decimals));// 3.6 billion tokens, 18 decimal places
+  uint256 public constant MAX_SUPPLY = 6000000000 * (10 ** uint256(decimals));// 3.6 billion tokens, 18 decimal places
 
   /**
    * @dev Constructor that gives msg.sender all of existing tokens.
    */
   function LendroidSupportToken() public {
-    totalSupply = INITIAL_SUPPLY;
-    balances[msg.sender] = INITIAL_SUPPLY;
+    paused = true;
   }
 }
 
@@ -24,24 +23,10 @@ contract LendroidSupportToken is MintableToken, PausableToken {
 contract ContributorWhitelist is HasNoEther {
   PrivateSale internal saleContract;
   mapping (address => bool) whitelist;
-  address private whitelistableOwner;
-
-  /**
-   * @dev Throws if called by any account other than the owner, mintableOwner.
-   */
-  modifier onlyWhitelistableOwner() {
-    require((msg.sender == owner) || ((whitelistableOwner != address(0)) && (msg.sender == whitelistableOwner)));
-    _;
-  }
 
   modifier onlyOwnerOrCrowdSaleContract() {
     require((msg.sender == owner) || (msg.sender == address(saleContract)));
     _;
-  }
-
-  function setWhitelistableOwner(address _address) onlyOwner public returns(bool) {
-    whitelistableOwner = _address;
-    return true;
   }
 
   function setSaleContractAddress(address _address) public onlyOwner returns(bool) {
@@ -49,7 +34,7 @@ contract ContributorWhitelist is HasNoEther {
     return true;
   }
 
-  function whitelistAddress(address _address) public onlyWhitelistableOwner returns(bool) {
+  function whitelistAddress(address _address) public onlyOwner returns(bool) {
     whitelist[_address] = true;
     return true;
   }
