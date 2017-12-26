@@ -21,7 +21,7 @@ contract LendroidSupportToken is MintableToken, PausableToken {
 
 
 contract ContributorWhitelist is HasNoEther {
-  PrivateSale internal saleContract;
+  PrivateSale public saleContract;
   mapping (address => bool) whitelist;
 
   modifier onlyOwnerOrCrowdSaleContract() {
