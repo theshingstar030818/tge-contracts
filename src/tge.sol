@@ -21,16 +21,21 @@ contract LendroidSupportToken is MintableToken, PausableToken {
 
 
 contract ContributorWhitelist is HasNoEther {
-  PrivateSale public saleContract;
-  mapping (address => bool) whitelist;
+  mapping (address => bool) public authorized;
+  mapping (address => bool) public whitelist;
 
-  modifier onlyOwnerOrCrowdSaleContract() {
-    require((msg.sender == owner) || (msg.sender == address(saleContract)));
+  modifier auth() {
+    require((msg.sender == owner) || (authorized[msg.sender]));
     _;
   }
 
-  function setSaleContractAddress(address _address) public onlyOwner returns(bool) {
-    saleContract = PrivateSale(_address);
+  function setAuthority(address _address) public onlyOwner returns(bool) {
+    authorized[_address] = true;
+    return true;
+  }
+
+  function removeAuthority(address _address) public onlyOwner returns(bool) {
+    authorized[_address] = false;
     return true;
   }
 
@@ -44,7 +49,7 @@ contract ContributorWhitelist is HasNoEther {
     return true;
   }
 
-  function isWhitelisted(address _address) public onlyOwnerOrCrowdSaleContract view returns(bool) {
+  function isWhitelisted(address _address) public auth view returns(bool) {
     return whitelist[_address];
   }
 
@@ -52,14 +57,13 @@ contract ContributorWhitelist is HasNoEther {
 
 
 /**
- * @title Crowdsale
- * @dev Crowdsale is a base contract for managing a token crowdsale.
- * Crowdsales have a start and end timestamps, where investors can make
- * token purchases and the crowdsale will assign them tokens based
- * on a token per ETH rate. Funds collected are forwarded to a wallet
- * as they arrive.
+ * @title BaseSale
+ * @dev BaseSale is a base contract for managing a token crowdsale.
+ * Investors can make token purchases and (if the canMint option is true)
+ * the conact will assign them tokens based on a token per ETH rate.
+ * Funds collected are forwarded to a coldStorageWallet as they arrive.
  */
-contract PrivateSale is Pausable {
+contract BaseSale is Pausable {
   using SafeMath for uint256;
 
   // The token being sold
@@ -78,10 +82,10 @@ contract PrivateSale is Pausable {
   uint256 public weiRaised;
 
   // sale cap in wei
-  uint256 public totalCap = 25000 * (10**18);
+  uint256 public totalCap;
 
   // individual cap in wei
-  uint256 public individualCap = 5000 * (10**18);
+  uint256 public individualCap;
 
   struct Contribution {
     uint256 timestamp;
@@ -92,36 +96,7 @@ contract PrivateSale is Pausable {
   mapping (address => Contribution[]) private contributions;
   mapping (address => uint256) public totalWeiContributed;
 
-  /**
-   * event for token purchase logging
-   * @param purchaser who paid for the tokens
-   * @param beneficiary who got the tokens
-   * @param value weis paid for purchase
-   * @param amount amount of tokens purchased
-   */
-  event TokenPurchase(address indexed purchaser, address indexed beneficiary, uint256 value, uint256 amount);
 
-  function PrivateSale(
-      address _token,
-      uint256 _rate,
-      address _wallet,
-      address _whitelist
-    )
-    public
-  {
-    require(_rate > 0);
-    require(_wallet != address(0));
-
-    token = LendroidSupportToken(_token);
-    whitelist = ContributorWhitelist(_whitelist);
-    rate = _rate;
-    wallet = _wallet;
-  }
-
-  // fallback function can be used to buy tokens
-  function () external payable {
-    buyTokens(msg.sender);
-  }
 
   /**
    * @dev Function to set ContributorWhitelist address.
@@ -159,40 +134,14 @@ contract PrivateSale is Pausable {
     return true;
   }
 
-  // low level token purchase function
-  function buyTokens(address beneficiary) whenNotPaused public payable {
-    require(beneficiary != address(0));
-    require(validPurchase());
-    // Validate contributor has been whitelisted
-    require(whitelist.isWhitelisted(beneficiary));
-
-    uint256 weiAmount = msg.value;
-
-    // update state
-    totalWeiContributed[beneficiary] = totalWeiContributed[beneficiary].add(weiAmount);
-    require(totalWeiContributed[beneficiary] <= individualCap);
-    weiRaised = weiRaised.add(weiAmount);
-    require(weiRaised <= totalCap);
-
-    // Save the contribution for future reference
-    saveContribution();
-    // calculate token amount to be created
-    // Mint LST into beneficiary account
-    uint256 tokens = weiAmount.mul(rate);
-    token.mint(beneficiary, tokens);
-    TokenPurchase(msg.sender, beneficiary, weiAmount, tokens);
-
-    forwardFunds();
-  }
-
-  function saveContribution() internal {
+  function saveContribution(address beneficiary) internal {
     // save contribution
     Contribution memory _contribution = Contribution({
       timestamp: now,
       WEIContributed: msg.value,
       LST_WEI_rate: rate
     });
-    contributions[msg.sender].push(_contribution);
+    contributions[beneficiary].push(_contribution);
   }
 
   // send ether to the fund collection wallet
@@ -245,5 +194,133 @@ contract PrivateSale is Pausable {
    */
   function escapeHatchTransferRemainingBalance() whenPaused external onlyOwner {
     require(owner.send(this.balance));
+  }
+}
+
+
+contract PrivateSale is BaseSale {
+  /**
+   * event for token purchase logging
+   * @param purchaser who paid for the tokens
+   * @param beneficiary who got the tokens
+   * @param value weis paid for purchase
+   * @param amount amount of tokens purchased
+   */
+  event TokenPurchase(address indexed purchaser, address indexed beneficiary, uint256 value, uint256 amount);
+
+  function PrivateSale(
+      address _token,
+      uint256 _rate,
+      address _wallet,
+      address _whitelist
+    )
+    public
+  {
+    require(_rate > 0);
+    require(_wallet != address(0));
+
+    token = LendroidSupportToken(_token);
+    whitelist = ContributorWhitelist(_whitelist);
+    rate = _rate;
+    wallet = _wallet;
+
+    totalCap = 25000 * (10**18);
+    individualCap = 5000 * (10**18);
+  }
+
+  // fallback function can be used to buy tokens
+  function () external payable {
+    buyTokens(msg.sender);
+  }
+
+  // low level token purchase function
+  function buyTokens(address beneficiary) whenNotPaused public payable {
+    require(beneficiary != address(0));
+    require(validPurchase());
+    // Validate contributor has been whitelisted
+    require(whitelist.isWhitelisted(beneficiary));
+
+    uint256 weiAmount = msg.value;
+
+    // update state
+    totalWeiContributed[beneficiary] = totalWeiContributed[beneficiary].add(weiAmount);
+    require(totalWeiContributed[beneficiary] <= individualCap);
+    weiRaised = weiRaised.add(weiAmount);
+    require(weiRaised <= totalCap);
+
+    // Save the contribution for future reference
+    saveContribution(beneficiary);
+    // calculate token amount to be created
+    // Mint LST into beneficiary account
+    uint256 tokens = weiAmount.mul(rate);
+    token.mint(beneficiary, tokens);
+    TokenPurchase(beneficiary, beneficiary, weiAmount, tokens);
+
+    forwardFunds();
+  }
+}
+
+
+contract SaftSale is BaseSale {
+  /**
+   * event for saft purchase logging
+   * @param purchaser who paid for the saft
+   * @param beneficiary who will receive the saft
+   * @param value weis paid for purchase
+   */
+  event SaftPurchase(address indexed purchaser, address indexed beneficiary, uint256 value);
+
+  function SaftSale(
+    address _token,
+    uint256 _rate,
+    address _wallet,
+    address _whitelist
+  )
+  public
+  {
+    require(_rate > 0);
+    require(_wallet != address(0));
+
+    token = LendroidSupportToken(_token);
+    whitelist = ContributorWhitelist(_whitelist);
+    rate = _rate;
+    wallet = _wallet;
+
+    totalCap = 25000 * (10**18);
+    individualCap = 5000 * (10**18);
+  }
+
+  function mintTokens(address beneficiary) whenPaused onlyOwner public returns(bool) {
+    require(whitelist.isWhitelisted(beneficiary));
+    uint256 weiAmount = totalWeiContributed[beneficiary];
+    uint256 tokens = weiAmount.mul(rate);
+    token.mint(beneficiary, tokens);
+    return true;
+  }
+
+  // fallback function can be used to buy tokens
+  function () external payable {
+    buySaft(msg.sender);
+  }
+
+  // low level token purchase function
+  function buySaft(address beneficiary) whenNotPaused public payable {
+    require(beneficiary != address(0));
+    require(validPurchase());
+    // Validate contributor has been whitelisted
+    require(whitelist.isWhitelisted(beneficiary));
+
+    uint256 weiAmount = msg.value;
+
+    // update state
+    totalWeiContributed[beneficiary] = totalWeiContributed[beneficiary].add(weiAmount);
+    require(totalWeiContributed[beneficiary] <= individualCap);
+    weiRaised = weiRaised.add(weiAmount);
+    require(weiRaised <= totalCap);
+
+    // Save the contribution for future reference
+    saveContribution(beneficiary);
+    SaftPurchase(beneficiary, beneficiary, weiAmount);
+    forwardFunds();
   }
 }
