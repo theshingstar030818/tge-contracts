@@ -79,27 +79,6 @@ contract Ownable {
 
 
 /**
- * @title Destructible
- * @dev Base contract that can be destroyed by owner. All funds in contract will be sent to the owner.
- */
-contract Destructible is Ownable {
-
-  function Destructible() public payable { }
-
-  /**
-   * @dev Transfers the current balance to the owner and terminates the contract.
-   */
-  function destroy() onlyOwner public {
-    selfdestruct(owner);
-  }
-
-  function destroyAndSend(address _recipient) onlyOwner public {
-    selfdestruct(_recipient);
-  }
-}
-
-
-/**
  * @title Pausable
  * @dev Base contract which allows children to implement an emergency stop mechanism.
  */
@@ -386,7 +365,7 @@ contract MintableToken is StandardToken, Ownable {
  * `selfdestruct(contract_address)`
  * mining directly to the contract address
 */
-contract HasNoEther is Destructible {
+contract HasNoEther is Ownable {
 
   /**
   * @dev Constructor that rejects incoming Ether

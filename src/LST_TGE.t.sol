@@ -78,8 +78,21 @@ contract LST_TGE is DSTest {
         LST.balanceOf(address(TestUser)),
         0
       );
+      assertEq(
+        Sale.totalWeiContributed(address(TestUser)),
+        0
+      );
+      assertEq(
+        Sale.weiRaised(),
+        0
+      );
       // buy LST for 1 ether as TestUser
       Sale.buyTokens.value(1 ether)(address(TestUser));
+      // Confirm 1 ether has been contributed by TestUser
+      assertEq(
+        Sale.totalWeiContributed(address(TestUser)),
+        1 ether
+      );
       // Confirm 24,000 LST has been minted for TestUser
       assertEq(
         LST.balanceOf(address(TestUser)),
@@ -95,6 +108,62 @@ contract LST_TGE is DSTest {
         Sale.balance,
         0
       );
+      // Confirm weiRaised has been updated on Sale contract
+      assertEq(
+        Sale.weiRaised(),
+        1 ether
+      );
+    }
+
+    function testFail_BuyTokensIfPaused() public {
+      // Whitelist TestUser
+      Whitelist.whitelistAddress(address(TestUser));
+      // Pause Sale contract
+      Sale.pause();
+      // Buy LST as TestUser
+      Sale.buyTokens.value(1 ether)(address(TestUser));
+    }
+
+    function testFail_BuyAboveIndividualCap() public {
+      // Whitelist TestUser address
+      Whitelist.whitelistAddress(address(TestUser));
+      // buy LST for 101 ether as TestUser
+      Sale.buyTokens.value(5001 ether)(address(TestUser));
+    }
+
+    function testFail_BuyAfterTotalCapHasReached() public {
+      // Buy until total cap is reached
+      for (uint contibutionCount = 1; contibutionCount < 6; contibutionCount++) {
+        TestUser = new User();
+        // Whitelist TestUser address
+        Whitelist.whitelistAddress(address(TestUser));
+        // buy LST for 101 ether as TestUser
+        Sale.buyTokens.value(5000 ether)(address(TestUser));
+      }
+      // Now the next buy should fail
+      TestUser = new User();
+      // Whitelist TestUser address
+      Whitelist.whitelistAddress(address(TestUser));
+      // buy LST for 101 ether as TestUser
+      Sale.buyTokens.value(5000 ether)(address(TestUser));
+    }
+
+    function test_BuyAfterChangingIndividualCap() public {
+      // Whitelist TestUser address
+      Whitelist.whitelistAddress(address(TestUser));
+      // buy LST for 101 ether as TestUser
+      Sale.buyTokens.value(5000 ether)(address(TestUser));
+      Sale.setIndividualCap(9000 ether);
+      Sale.buyTokens.value(4000 ether)(address(TestUser));
+    }
+
+    function testFail_BuyAfterChangingIndividualCap() public {
+      // Whitelist TestUser address
+      Whitelist.whitelistAddress(address(TestUser));
+      // buy LST for 101 ether as TestUser
+      Sale.buyTokens.value(5000 ether)(address(TestUser));
+      Sale.setIndividualCap(9000 ether);
+      Sale.buyTokens.value(5000 ether)(address(TestUser));
     }
 
 }

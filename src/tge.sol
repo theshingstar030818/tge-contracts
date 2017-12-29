@@ -9,10 +9,10 @@ contract LendroidSupportToken is MintableToken, PausableToken {
   string public constant symbol = "LST";
   uint8 public constant decimals = 18;
 
-  uint256 public constant MAX_SUPPLY = 6000000000 * (10 ** uint256(decimals));// 3.6 billion tokens, 18 decimal places
+  uint256 public constant MAX_SUPPLY = 6000000000 * (10 ** uint256(decimals));// 6 billion tokens, 18 decimal places
 
   /**
-   * @dev Constructor that gives msg.sender all of existing tokens.
+   * @dev Constructor that pauses tradability of tokens.
    */
   function LendroidSupportToken() public {
     paused = true;
@@ -59,7 +59,7 @@ contract ContributorWhitelist is HasNoEther {
  * on a token per ETH rate. Funds collected are forwarded to a wallet
  * as they arrive.
  */
-contract PrivateSale is Pausable, Destructible {
+contract PrivateSale is Pausable {
   using SafeMath for uint256;
 
   // The token being sold
@@ -77,8 +77,11 @@ contract PrivateSale is Pausable, Destructible {
   // amount of raised money in wei
   uint256 public weiRaised;
 
-  // sale cap
-  uint public cap = 60000 * (10**18);
+  // sale cap in wei
+  uint256 public totalCap = 25000 * (10**18);
+
+  // individual cap in wei
+  uint256 public individualCap = 5000 * (10**18);
 
   struct Contribution {
     uint256 timestamp;
@@ -87,6 +90,7 @@ contract PrivateSale is Pausable, Destructible {
   }
 
   mapping (address => Contribution[]) private contributions;
+  mapping (address => uint256) public totalWeiContributed;
 
   /**
    * event for token purchase logging
@@ -128,6 +132,33 @@ contract PrivateSale is Pausable, Destructible {
     return true;
   }
 
+  /**
+   * @dev Function to set rate.
+   * @return True if the operation was successful.
+   */
+  function setRate(uint256 _rate) onlyOwner public returns (bool) {
+    rate = _rate;
+    return true;
+  }
+
+  /**
+   * @dev Function to set totalCap.
+   * @return True if the operation was successful.
+   */
+  function setTotalCap(uint256 _capInWei) onlyOwner public returns (bool) {
+    totalCap = _capInWei;
+    return true;
+  }
+
+  /**
+   * @dev Function to set individualCap.
+   * @return True if the operation was successful.
+   */
+  function setIndividualCap(uint256 _capInWei) onlyOwner public returns (bool) {
+    individualCap = _capInWei;
+    return true;
+  }
+
   // low level token purchase function
   function buyTokens(address beneficiary) whenNotPaused public payable {
     require(beneficiary != address(0));
@@ -137,13 +168,17 @@ contract PrivateSale is Pausable, Destructible {
 
     uint256 weiAmount = msg.value;
 
-    // calculate token amount to be created
-    uint256 tokens = weiAmount.mul(rate);
-
     // update state
-    saveContribution();
+    totalWeiContributed[beneficiary] = totalWeiContributed[beneficiary].add(weiAmount);
+    require(totalWeiContributed[beneficiary] <= individualCap);
     weiRaised = weiRaised.add(weiAmount);
+    require(weiRaised <= totalCap);
 
+    // Save the contribution for future reference
+    saveContribution();
+    // calculate token amount to be created
+    // Mint LST into beneficiary account
+    uint256 tokens = weiAmount.mul(rate);
     token.mint(beneficiary, tokens);
     TokenPurchase(msg.sender, beneficiary, weiAmount, tokens);
 
@@ -172,7 +207,7 @@ contract PrivateSale is Pausable, Destructible {
     return nonZeroPurchase;
   }
 
-  // overriding Crowdsale#hasEnded to add cap logic
+  // overriding PrivateSale#hasEnded to add cap logic
   // @return true if crowdsale event has ended
   function hasEnded() public view returns (bool) {
     return paused;
