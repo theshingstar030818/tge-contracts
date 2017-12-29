@@ -262,13 +262,6 @@ contract PrivateSale is BaseSale {
 
 
 contract SaftSale is BaseSale {
-  /**
-   * event for saft purchase logging
-   * @param purchaser who paid for the saft
-   * @param beneficiary who will receive the saft
-   * @param value weis paid for purchase
-   */
-  event SaftPurchase(address indexed purchaser, address indexed beneficiary, uint256 value);
 
   function SaftSale(
     address _token,
@@ -288,14 +281,6 @@ contract SaftSale is BaseSale {
 
     totalCap = 25000 * (10**18);
     individualCap = 5000 * (10**18);
-  }
-
-  function mintTokens(address beneficiary) whenPaused onlyOwner public returns(bool) {
-    require(whitelist.isWhitelisted(beneficiary));
-    uint256 weiAmount = totalWeiContributed[beneficiary];
-    uint256 tokens = weiAmount.mul(rate);
-    token.mint(beneficiary, tokens);
-    return true;
   }
 
   // fallback function can be used to buy tokens
@@ -320,7 +305,6 @@ contract SaftSale is BaseSale {
 
     // Save the contribution for future reference
     saveContribution(beneficiary);
-    SaftPurchase(beneficiary, beneficiary, weiAmount);
     forwardFunds();
   }
 }
