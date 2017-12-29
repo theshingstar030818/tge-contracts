@@ -34,10 +34,9 @@ contract ContributorWhitelistTest is DSTest {
         this
       );
       // link PrivateSale to Whitelist
-      whitelist.setSaleContractAddress(address(sale));
-      assertEq(
-        whitelist.saleContract(),
-        address(sale)
+      whitelist.setAuthority(address(sale));
+      assertTrue(
+        whitelist.authorized(address(sale))
       );
     }
 

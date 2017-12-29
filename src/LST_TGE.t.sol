@@ -48,7 +48,7 @@ contract LST_TGE is DSTest {
           address(Whitelist)
         );
         // link PrivateSale to Whitelist
-        Whitelist.setSaleContractAddress(address(Sale));
+        Whitelist.setAuthority(address(Sale));
         // link PrivateSale to LST
         LST.setMintableOwner(address(Sale));
     }
