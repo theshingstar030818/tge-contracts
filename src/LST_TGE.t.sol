@@ -22,6 +22,8 @@ contract LST_TGE is DSTest {
     PrivateSale Sale;
     uint256 totalBonus;
     uint256 initialBonusPercentage;
+    uint256 saleStartTimestamp;
+    uint256 saleEndTimestamp;
 
     function setUp() public {
         // deploy TestUser
@@ -45,13 +47,17 @@ contract LST_TGE is DSTest {
         // deploy PrivateSale contract
         totalBonus = 6 * (10 ** 9);
         initialBonusPercentage = 25 * (10 ** 16);
+        saleStartTimestamp = now;
+        saleEndTimestamp = now + 10 days;
         Sale = new PrivateSale(
           address(LST),
           24000,
           address(ColdStorageWallet),
           address(Whitelist),
           totalBonus,
-          initialBonusPercentage
+          initialBonusPercentage,
+          saleStartTimestamp,
+          saleEndTimestamp
         );
         // link PrivateSale to Whitelist
         Whitelist.setAuthority(address(Sale));
@@ -102,7 +108,7 @@ contract LST_TGE is DSTest {
       // Confirm 24,000 LST has been reserved for TestUser
       assertEq(
         Sale.reserved(address(TestUser)),
-        24000000000000000000000
+        24000 * (10 ** 18)
       );
       // Confirm No LST has been minted separately for TestUser
       assertEq(
@@ -124,6 +130,11 @@ contract LST_TGE is DSTest {
         Sale.weiRaised(),
         1 ether
       );
+      // Confirm totalBonus has been reduced by the LST reserved
+      /* assertEq(
+        Sale.totalBonus(),
+        totalBonus - (24000 * (10 ** 18))
+      ); */
     }
 
     function testFail_BuyTokensIfPaused() public {
@@ -175,6 +186,36 @@ contract LST_TGE is DSTest {
       Sale.buyTokens.value(5000 ether)(address(TestUser));
       Sale.setIndividualCap(9000 ether);
       Sale.buyTokens.value(5000 ether)(address(TestUser));
+    }
+
+    // Tests involving Vesting
+    function test_DecisionVesting() public {
+      // Whitelist TestUser address
+      Whitelist.whitelistAddress(address(TestUser));
+      // buy LST for 1 ether as TestUser
+      Sale.buyTokens.value(1 ether)(address(TestUser));
+      // Confirm 1 ether has been contributed by TestUser
+      // Confirm 24,000 LST has been reserved for TestUser
+      assertEq(
+        Sale.reserved(address(TestUser)),
+        24000 * (10 ** 18)
+      );
+      assertEq(
+        Sale.totalReservedForVesting(),
+        0
+      );
+      assert(!Sale.vesting(address(TestUser)));
+      bool _vestingDecision = true;
+      assert(Sale.vestFor(address(TestUser), _vestingDecision));
+      assertEq(
+        Sale.totalReservedForVesting(),
+        24000 * (10 ** 18)
+      );
+      assert(Sale.vesting(address(TestUser)));
+      /* assertEq(
+        Sale.showBonusFor(address(TestUser)),
+        0
+      ); */
     }
 
 }

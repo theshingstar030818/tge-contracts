@@ -23,13 +23,17 @@ contract ContributorWhitelistTest is DSTest {
       Wallet ColdStorageWallet = new Wallet();
       uint256 totalBonus = 6 * (10 ** 9);
       uint256 initialBonusPercentage = 25 * (10 ** 16);
+      uint256 saleStartTimestamp = now;
+      uint256 saleEndTimestamp = now + 10 days;
       PrivateSale sale = new PrivateSale(
         address(LST),
         24000,
         address(ColdStorageWallet),
         address(whitelist),
         totalBonus,
-        initialBonusPercentage
+        initialBonusPercentage,
+        saleStartTimestamp,
+        saleEndTimestamp
       );
       // Assert owner is current contract
       assertEq(
