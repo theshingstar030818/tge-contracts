@@ -20,6 +20,8 @@ contract LST_TGE is DSTest {
     LendroidSupportToken LST;
     ContributorWhitelist Whitelist;
     PrivateSale Sale;
+    uint256 totalBonus;
+    uint256 initialBonusPercentage;
 
     function setUp() public {
         // deploy TestUser
@@ -41,11 +43,15 @@ contract LST_TGE is DSTest {
           0
         );
         // deploy PrivateSale contract
+        totalBonus = 6 * (10 ** 9);
+        initialBonusPercentage = 25 * (10 ** 16);
         Sale = new PrivateSale(
           address(LST),
           24000,
           address(ColdStorageWallet),
-          address(Whitelist)
+          address(Whitelist),
+          totalBonus,
+          initialBonusPercentage
         );
         // link PrivateSale to Whitelist
         Whitelist.setAuthority(address(Sale));
@@ -93,10 +99,15 @@ contract LST_TGE is DSTest {
         Sale.totalWeiContributed(address(TestUser)),
         1 ether
       );
-      // Confirm 24,000 LST has been minted for TestUser
+      // Confirm 24,000 LST has been reserved for TestUser
+      assertEq(
+        Sale.reserved(address(TestUser)),
+        24000000000000000000000
+      );
+      // Confirm No LST has been minted separately for TestUser
       assertEq(
         LST.balanceOf(address(TestUser)),
-        24000000000000000000000
+        0
       );
       // Confirm 1 ether was transferred to ColdStorageWallet
       assertEq(

@@ -18,15 +18,18 @@ contract ContributorWhitelistTest is DSTest {
         whitelist = new ContributorWhitelist();
     }
 
-
     function test_OnlyOwnerOrCrowdSaleContract() public {
       LendroidSupportToken LST = new LendroidSupportToken();
       Wallet ColdStorageWallet = new Wallet();
+      uint256 totalBonus = 6 * (10 ** 9);
+      uint256 initialBonusPercentage = 25 * (10 ** 16);
       PrivateSale sale = new PrivateSale(
         address(LST),
         24000,
         address(ColdStorageWallet),
-        address(whitelist)
+        address(whitelist),
+        totalBonus,
+        initialBonusPercentage
       );
       // Assert owner is current contract
       assertEq(
