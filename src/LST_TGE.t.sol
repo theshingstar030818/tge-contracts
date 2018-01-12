@@ -14,6 +14,7 @@ contract Wallet {
 
 
 contract LST_TGE is DSTest {
+
     /*contracts*/
     User TestUser;
     Wallet ColdStorageWallet;
@@ -24,6 +25,8 @@ contract LST_TGE is DSTest {
     uint256 initialBonusPercentage;
     uint256 saleStartTimestamp;
     uint256 saleEndTimestamp;
+    uint256 precision = 10 ** 18;
+    uint256 LSTRatePerEther = 24000;
 
     function setUp() public {
         // deploy TestUser
@@ -98,6 +101,11 @@ contract LST_TGE is DSTest {
         Sale.weiRaised(),
         0
       );
+      // Confirm totalBonus has been reduced by the LST reserved
+      assertEq(
+        Sale.totalBonus(),
+        totalBonus * precision
+      );
       // buy LST for 1 ether as TestUser
       Sale.buyTokens.value(1 ether)(address(TestUser));
       // Confirm 1 ether has been contributed by TestUser
@@ -108,7 +116,7 @@ contract LST_TGE is DSTest {
       // Confirm 24,000 LST has been reserved for TestUser
       assertEq(
         Sale.reserved(address(TestUser)),
-        24000 * (10 ** 18)
+        LSTRatePerEther * precision
       );
       // Confirm No LST has been minted separately for TestUser
       assertEq(
@@ -131,10 +139,10 @@ contract LST_TGE is DSTest {
         1 ether
       );
       // Confirm totalBonus has been reduced by the LST reserved
-      /* assertEq(
+      assertEq(
         Sale.totalBonus(),
-        totalBonus - (24000 * (10 ** 18))
-      ); */
+        (totalBonus - LSTRatePerEther) * precision
+      );
     }
 
     function testFail_BuyTokensIfPaused() public {
@@ -198,24 +206,71 @@ contract LST_TGE is DSTest {
       // Confirm 24,000 LST has been reserved for TestUser
       assertEq(
         Sale.reserved(address(TestUser)),
-        24000 * (10 ** 18)
+        LSTRatePerEther * precision
       );
       assertEq(
         Sale.totalReservedForVesting(),
         0
       );
       assert(!Sale.vesting(address(TestUser)));
+      assertEq(
+        Sale.expectedTokensWithBonus(address(TestUser)),
+        LSTRatePerEther * precision
+      );
       bool _vestingDecision = true;
       assert(Sale.vestFor(address(TestUser), _vestingDecision));
       assertEq(
         Sale.totalReservedForVesting(),
-        24000 * (10 ** 18)
+        LSTRatePerEther * precision
       );
       assert(Sale.vesting(address(TestUser)));
-      /* assertEq(
-        Sale.showBonusFor(address(TestUser)),
-        0
-      ); */
+      assertEq(
+        Sale.expectedTokensWithBonus(address(TestUser)),
+        totalBonus * precision
+      );
+    }
+
+    function test_ReservedWithBonus() public {
+      User AnotherUser;
+      uint256 totalContributions = 0;
+      uint256 _amount;
+      for (uint256 _i = 1; _i < 201; _i++) {
+        AnotherUser = new User();
+        // Whitelist TestUser address
+        Whitelist.whitelistAddress(address(AnotherUser));
+        // buy LST for 101 ether as TestUser
+        _amount = (_i+5);
+        totalContributions += _amount;
+        Sale.buyTokens.value(_amount * 1 ether)(address(AnotherUser));
+        assert(Sale.vestFor(address(AnotherUser), true));
+      }
+
+      // Whitelist TestUser address
+      Whitelist.whitelistAddress(address(TestUser));
+      // buy LST for 1 ether as TestUser
+      Sale.buyTokens.value(2 ether)(address(TestUser));
+      assert(Sale.vestFor(address(TestUser), true));
+      uint256 totalVested = (totalContributions + 2) * LSTRatePerEther * precision;
+      assertEq(
+        Sale.totalReservedForVesting(),
+        totalVested
+      );
+      uint256 amountVested = 2 * LSTRatePerEther * precision;
+      assertEq(
+        Sale.reserved(address(TestUser)),
+        amountVested
+      );
+      uint256 totalRemainingBonus = (totalBonus * precision) - totalVested;
+      assertEq(
+        Sale.totalBonus(),
+        totalRemainingBonus
+      );
+      uint256 expectedBonus = ((amountVested * totalRemainingBonus) / totalVested);
+      assert(Sale.vesting(address(TestUser)));
+      assertEq(
+        Sale.expectedTokensWithBonus(address(TestUser)),
+        amountVested + expectedBonus
+      );
     }
 
 }

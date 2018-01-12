@@ -309,24 +309,10 @@ contract MintableToken is StandardToken, Ownable {
   event MintFinished();
 
   bool public mintingFinished = false;
-  address private mintableOwner;
 
   modifier canMint() {
     require(!mintingFinished);
     _;
-  }
-
-  /**
-   * @dev Throws if called by any account other than the owner, mintableOwner.
-   */
-  modifier onlyMintableOwner() {
-    require((msg.sender == owner) || ((mintableOwner != address(0)) && (msg.sender == mintableOwner)));
-    _;
-  }
-
-  function setMintableOwner(address _address) onlyOwner public returns(bool) {
-    mintableOwner = _address;
-    return true;
   }
 
   /**
@@ -335,7 +321,7 @@ contract MintableToken is StandardToken, Ownable {
    * @param _amount The amount of tokens to mint.
    * @return A boolean that indicates if the operation was successful.
    */
-  function mint(address _to, uint256 _amount) onlyMintableOwner canMint public returns (bool) {
+  function mint(address _to, uint256 _amount) onlyOwner canMint public returns (bool) {
     totalSupply = totalSupply.add(_amount);
     balances[_to] = balances[_to].add(_amount);
     Mint(_to, _amount);

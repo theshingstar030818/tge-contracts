@@ -67,8 +67,8 @@ contract BaseSale is Pausable {
   using SafeMath for uint256;
 
   // start and end timestamps (both inclusive) when sale is open
-  uint256 public startTime;
-  uint256 public endTime;
+  uint256 public saleStartTime;
+  uint256 public saleEndTime;
 
   // The token being sold
   LendroidSupportToken public token;
@@ -96,17 +96,24 @@ contract BaseSale is Pausable {
     uint256 WEIContributed;
     uint256 LST_WEI_rate;
   }
-
   mapping (address => Contribution[]) private contributions;
+
+  struct ContributionRemoved {
+    uint256 timestamp;
+    uint256 WEIRemoved;
+    uint256 LST_WEI_rate;
+  }
+  mapping (address => ContributionRemoved[]) private contributionsRemoved;
+
   mapping (address => uint256) public totalWeiContributed;
 
   modifier whileSaleIsActive() {
-    require(now <= endTime);
+    require(now <= saleEndTime);
     _;
   }
 
   modifier afterSaleHasEnded() {
-    require(now > endTime);
+    require(now > saleEndTime);
     _;
   }
 
@@ -151,18 +158,28 @@ contract BaseSale is Pausable {
    * @return True if the operation was successful.
    */
   function endSale() onlyOwner public returns (bool) {
-    endTime = now;
+    saleEndTime = now;
     return true;
   }
 
-  function saveContribution(address beneficiary) internal {
+  function saveContribution(address beneficiary, uint256 weiAmount) internal {
     // save contribution
     Contribution memory _contribution = Contribution({
       timestamp: now,
-      WEIContributed: msg.value,
+      WEIContributed: weiAmount,
       LST_WEI_rate: rate
     });
     contributions[beneficiary].push(_contribution);
+  }
+
+  function removeContribution(address beneficiary, uint256 weiAmount) internal {
+    // save contribution
+    ContributionRemoved memory _contribution = ContributionRemoved({
+      timestamp: now,
+      WEIRemoved: weiAmount,
+      LST_WEI_rate: rate
+    });
+    contributionsRemoved[beneficiary].push(_contribution);
   }
 
   // send ether to the fund collection wallet
@@ -173,7 +190,7 @@ contract BaseSale is Pausable {
 
   // @return true if the transaction can buy tokens
   function validPurchase() internal view returns (bool) {
-    bool withinPeriod = now >= startTime && now <= endTime;
+    bool withinPeriod = now >= saleStartTime && now <= saleEndTime;
     bool nonZeroPurchase = msg.value != 0;
     return withinPeriod && nonZeroPurchase;
   }
@@ -181,7 +198,7 @@ contract BaseSale is Pausable {
   // overriding PrivateSale#hasEnded to add cap logic
   // @return true if crowdsale event has ended
   function hasEnded() public view returns (bool) {
-    return now > endTime;
+    return now > saleEndTime;
   }
 
   // Total contributions made by contributor
@@ -211,6 +228,33 @@ contract BaseSale is Pausable {
     );
   }
 
+  // Total contributions removed from contributor
+  function getTotalContributionsRemoved(address _address) public view returns(uint256) {
+    return contributionsRemoved[_address].length;
+  }
+
+  // Detail about contribution
+  function getContributionRemovedDetail (
+        address _address,
+        uint256 _index
+      )
+      public
+      view
+      returns (
+        uint256,
+        uint256,
+        uint256
+      )
+  {
+    require(_index < contributionsRemoved[_address].length);
+    ContributionRemoved storage _contribution = contributionsRemoved[_address][_index];
+    return (
+      _contribution.timestamp,
+      _contribution.WEIRemoved,
+      _contribution.LST_WEI_rate
+    );
+  }
+
   /**
    * @dev Transfer all Ether held by the contract to the owner.
    */
@@ -220,100 +264,98 @@ contract BaseSale is Pausable {
 }
 
 
-contract SaftSale is BaseSale {
-
-  function SaftSale(
-    address _token,
-    uint256 _rate,
-    address _wallet,
-    address _whitelist
-  )
-  public
-  {
-    require(_rate > 0);
-    require(_wallet != address(0));
-
-    token = LendroidSupportToken(_token);
-    whitelist = ContributorWhitelist(_whitelist);
-    rate = _rate;
-    wallet = _wallet;
-
-    totalCap = 25000 * (10**18);
-    individualCap = 5000 * (10**18);
-  }
-
-  // fallback function can be used to buy tokens
-  function () external payable {
-    buySaft(msg.sender);
-  }
-
-  // low level token purchase function
-  function buySaft(address beneficiary) whenNotPaused public payable {
-    require(beneficiary != address(0));
-    require(validPurchase());
-    // Validate contributor has been whitelisted
-    require(whitelist.isWhitelisted(beneficiary));
-
-    uint256 weiAmount = msg.value;
-
-    // update state
-    totalWeiContributed[beneficiary] = totalWeiContributed[beneficiary].add(weiAmount);
-    require(totalWeiContributed[beneficiary] <= individualCap);
-    weiRaised = weiRaised.add(weiAmount);
-    require(weiRaised <= totalCap);
-
-    // Save the contribution for future reference
-    saveContribution(beneficiary);
-    forwardFunds();
-  }
-}
-
-
 contract PrivateSale is BaseSale {
-  event TokenPurchase(address indexed beneficiary, uint256 value, uint256 amount);
 
-  // addresses for whom LSTs will be reserved following purchase
-  mapping (address => uint256) public reserved;
-  // Total LSTs that would be reserved during the sale. Useful for calculating
-  // total bonus at end of sale
-  uint256 public totalReserved;
-  // addresses that choose to vest LST after end of sale
-  mapping (address => bool) public vesting;
-  // addresses that choose to withdraw LST after end of sale
-  mapping (address => uint256) public withdraws;
-
-  TokenReleaseScheduler public TRSContract;
-
-  uint256 public maxVestingDecisionOffsetAfterSaleEnd;
+  TRS public TRSContract;
+  uint256 constant public precision = 10 ** 18;
+  uint256 public TRSOffset;
   bool public tokenWithdrawalActivated;
 
-  // Vesting and bonus stats
+  // Total LSTs that would be reserved during the sale. Useful for calculating
+  // total bonus at end of sale
+  /* uint256 public totalPurchased; */
   uint256 public totalReservedForVesting;
-  uint256 public totalBonus;
+  uint256 public totalWithdrawable;
+  // Bonus counters
+  uint256 public totalAvailableTokens;
   uint256 public initialBonusPercentage;
-  uint256 constant public precision = 10 ** 18;
+  uint256 public cyclicalBonusPercentage;
+
+  // addresses for whom LSTs will be reserved following purchase
+  address[] reservations;
+  mapping (address => uint256) public reserved;
+  mapping (address => bool) public hasVested;
+  mapping (address => uint256) public released;
+  mapping (address => bool) public hasWithdrawn;
+
+  // withdrawable LST after end of sale
+  mapping (address => uint256) public withdrawable;
+  // TRS Schedule counters
+  uint256 public totalReleaseCycles;
+  uint constant public scheduleInterval = 30 days;
+  bool public scheduleConfigured;
+  bool public scheduleLocked;
+  uint256 public scheduleStartTime = 0;
+
+  /**
+   * Events
+   */
+  event TokenPurchase(address indexed beneficiary, uint256 value, uint256 amount);
+  event Released(address indexed toWhom, uint amount);
+  event Reserved(address indexed forWhom, uint amount);
 
   modifier whileVestingDecisionCanBeMade() {
-    require((now <= endTime) || (now > endTime && now.sub(endTime) <= maxVestingDecisionOffsetAfterSaleEnd));
+    require((now <= saleEndTime) || ((now > saleEndTime) && (now.sub(saleEndTime) <= TRSOffset)));
     _;
   }
 
   modifier whenVestingDecisionCannotBeMade() {
-    require(now > endTime && now.sub(endTime) > maxVestingDecisionOffsetAfterSaleEnd);
+    require(now > saleEndTime && now.sub(saleEndTime) > TRSOffset);
     _;
   }
 
   modifier canWithdraw() {
-    require((tokenWithdrawalActivated) && (now.sub(endTime) > maxVestingDecisionOffsetAfterSaleEnd));
+    require((tokenWithdrawalActivated) && (now.sub(saleEndTime) > TRSOffset));
     _;
   }
+
+  modifier preScheduleLock() { require(!scheduleLocked && scheduleStartTime == 0); _; }
+
+  /**
+   * Lock called, deposits no longer available.
+  */
+  modifier postScheduleLock() { require(scheduleLocked); _; }
+
+  /**
+    * Prestart, state is after lock, before start
+    */
+  modifier preScheduleStart() { require(scheduleLocked && scheduleStartTime == 0); _; }
+
+  /**
+   * Start called, the savings contract is now finalized, and withdrawals
+   * are now permitted.
+   */
+  modifier postScheduleStart() { require(scheduleLocked && scheduleStartTime != 0); _; }
+
+  /**
+   * Uninitialized state, before init is called. Mainly used as a guard to
+   * finalize periods and t0special.
+   */
+  modifier scheduleConfigurationIncomplete() { require(!scheduleConfigured); _; }
+
+  /**
+   * Post initialization state, mainly used to guarantee that
+   * periods and t0special have been set properly before starting
+   * the withdrawal process.
+   */
+  modifier scheduleConfigurationCompleted() { require(scheduleConfigured); _; }
 
   function PrivateSale(
       address _token,
       uint256 _rate,
       address _wallet,
       address _whitelist,
-      uint256 _totalBonus,
+      uint256 _totalLST,
       uint256 _initialBonusPercentage,
       uint256 _startTime, uint256 _endTime
     )
@@ -328,19 +370,19 @@ contract PrivateSale is BaseSale {
     whitelist = ContributorWhitelist(_whitelist);
     rate = _rate;
     wallet = _wallet;
-    startTime = _startTime;
-    endTime = _endTime;
+    saleStartTime = _startTime;
+    saleEndTime = _endTime;
 
-    totalCap = 25000 * (10**18);
-    individualCap = 5000 * (10**18);
-    maxVestingDecisionOffsetAfterSaleEnd = 7 days;
+    totalCap = 25000 * precision;
+    individualCap = 5000 * precision;
+    TRSOffset = 7 days;
     tokenWithdrawalActivated = false;
-    totalBonus = _totalBonus.mul(precision);
+    totalAvailableTokens = _totalLST * precision;
     initialBonusPercentage = _initialBonusPercentage;
   }
 
   function setTRSContract(address _address) onlyOwner public returns(bool) {
-      TRSContract = TokenReleaseScheduler(_address);
+      TRSContract = TRS(_address);
       return true;
   }
 
@@ -349,14 +391,9 @@ contract PrivateSale is BaseSale {
       return true;
   }
 
-  function setVestingDecisionOffset(uint256 _offset) onlyOwner public returns(bool) {
-      maxVestingDecisionOffsetAfterSaleEnd = _offset;
+  function setTRSOffset(uint256 _offset) onlyOwner public returns(bool) {
+      TRSOffset = _offset;
       return true;
-  }
-
-  function finalizeBonus() afterSaleHasEnded onlyOwner public returns(bool) {
-    totalBonus = totalBonus.sub(totalReserved);
-    return true;
   }
 
   // fallback function can be used to buy tokens
@@ -365,13 +402,16 @@ contract PrivateSale is BaseSale {
   }
 
   // low level token purchase function
-  function buyTokens(address beneficiary) whileSaleIsActive whenNotPaused public payable {
+  function buyTokens(address beneficiary) public payable {
+    _performReserve(beneficiary, msg.value);
+  }
+
+  function _performReserve(address beneficiary, uint256 weiAmount) whileSaleIsActive whenNotPaused internal {
+    require(!hasVested[beneficiary]);
     require(beneficiary != address(0));
     require(validPurchase());
     // Validate contributor has been whitelisted
     require(whitelist.isWhitelisted(beneficiary));
-
-    uint256 weiAmount = msg.value;
 
     // update state
     totalWeiContributed[beneficiary] = totalWeiContributed[beneficiary].add(weiAmount);
@@ -380,173 +420,139 @@ contract PrivateSale is BaseSale {
     require(weiRaised <= totalCap);
 
     // Save the contribution for future reference
-    saveContribution(beneficiary);
+    saveContribution(beneficiary, weiAmount);
     // calculate token amount to be created
     // Mint LST into beneficiary account
     uint256 tokens = weiAmount.mul(rate);
-    require(totalBonus > tokens);
     reserved[beneficiary] = reserved[beneficiary].add(tokens);
-    totalReserved = totalReserved.add(tokens);
-    totalBonus = totalBonus.sub(tokens);
+    /* totalPurchased = totalPurchased.add(tokens); */
     TokenPurchase(beneficiary, weiAmount, tokens);
 
     forwardFunds();
   }
 
-  function vest(bool _decision) public returns(bool) {
-    return vestFor(msg.sender, _decision);
+  function bulkReserve(address[] addrs, uint256[] weiAmounts) onlyOwner public returns(bool) {
+    require(addrs.length <= 100);
+    require(addrs.length == weiAmounts.length);
+    for (uint i=0; i<addrs.length; i++) {
+      _performReserve(addrs[i], weiAmounts[i]);
+    }
   }
 
-  function vestFor(address _beneficiary, bool _decision) whileVestingDecisionCanBeMade whenNotPaused public returns(bool) {
-    uint256 tokens = reserved[_beneficiary];
-    require(tokens > 0);
-    if (_decision && !vesting[_beneficiary]) {
-      totalReservedForVesting = totalReservedForVesting.add(tokens);
+  function _performRemoveReserve(address beneficiary, uint256 weiAmount) whileSaleIsActive whenNotPaused internal {
+    require(beneficiary != address(0));
+    require(weiAmount > 0);
+
+    // update state
+    totalWeiContributed[beneficiary] = totalWeiContributed[beneficiary].sub(weiAmount);
+    weiRaised = weiRaised.sub(weiAmount);
+    removeContribution(beneficiary, weiAmount);
+    // calculate token amount to be removed
+    uint256 tokens = weiAmount.mul(rate);
+    reserved[beneficiary] = reserved[beneficiary].sub(tokens);
+    // TODO: Transfer the amount back from wallet?
+  }
+
+  function removeReserve(address beneficiary, uint256 weiAmount) onlyOwner public returns(bool) {
+    _performRemoveReserve(beneficiary, weiAmount);
+  }
+
+  function bulkRemoveReserve(address[] addrs, uint256[] weiAmounts) onlyOwner public returns(bool) {
+    require(addrs.length <= 100);
+    require(addrs.length == weiAmounts.length);
+    for (uint i=0; i<addrs.length; i++) {
+      removeReserve(addrs[i], weiAmounts[i]);
     }
-    if (!_decision && vesting[_beneficiary]) {
-      totalReservedForVesting = totalReservedForVesting.sub(tokens);
+  }
+
+  function removeTotalReserve(address beneficiary) onlyOwner public returns(bool) {
+    uint totalReservedAmount = reserved[beneficiary];
+    _performRemoveReserve(beneficiary, totalReservedAmount);
+  }
+
+  function bulkRemoveTotalReserve(address[] addrs) onlyOwner public returns(bool) {
+    require(addrs.length <= 100);
+    for (uint i=0; i<addrs.length; i++) {
+      removeTotalReserve(addrs[i]);
     }
-    vesting[_beneficiary] = _decision;
+  }
+
+  // Low-level bonus calculation
+  function _calculateReserveWithBonus(address _beneficiary, uint256 totalVested) internal constant returns(uint256) {
+    uint256 reservedAmount = reserved[_beneficiary];
+    uint256 bonusAmount = reservedAmount.mul(totalAvailableTokens).div(totalVested);
+    uint256 reservedAmountWithBonus = reservedAmount.add(bonusAmount);
+    return reservedAmountWithBonus;
+  }
+
+  function expectedTokensWithBonus(address _beneficiary) constant public returns(uint256) {
+    uint256 reservedAmount = reserved[_beneficiary];
+    uint256 expectedTotalVestingAmount = totalReservedForVesting;
+    expectedTotalVestingAmount = expectedTotalVestingAmount.add(reservedAmount);
+    return _calculateReserveWithBonus(_beneficiary, expectedTotalVestingAmount);
+  }
+
+  // Vesting
+  function vest(bool _decision) public returns(bool) {
+    return _vest(msg.sender, _decision);
+  }
+
+  // Low-level bonus calculation
+  function _vest(address _beneficiary, bool _decision) whileVestingDecisionCanBeMade whenNotPaused internal returns(bool) {
+    // Ensure user does not double-vest
+    require(!hasVested[_beneficiary]);
+    require(reserved[_beneficiary] > 0);
+    totalReservedForVesting = totalReservedForVesting.add(reserved[_beneficiary]);
+    hasVested[_beneficiary] = _decision;
     return true;
   }
 
-  function _calculateReserveWithBonus(address _beneficiary) internal constant returns(uint256) {
-    uint256 reservedAmount = reserved[_beneficiary];
-    uint256 bonusProportion = reservedAmount.div(totalReservedForVesting);
-    uint256 bonusAmount = totalBonus.mul(bonusProportion).div(precision);
-    /* uint256 reservedAmountWithBonus = reservedAmount.add(bonusAmount); */
-    return bonusAmount;
+  function withdraw() public returns(bool) {
+    return _withdraw(msg.sender);
   }
 
-  function showBonusFor(address _beneficiary) constant public returns(uint256) {
-    return _calculateReserveWithBonus(_beneficiary);
-  }
-
-  function withdraw() afterSaleHasEnded whenVestingDecisionCannotBeMade whenNotPaused public returns(bool) {
-    // Get tokens reserved
-    uint256 reservedAmount = reserved[msg.sender];
+  function _withdraw(address _beneficiary) afterSaleHasEnded whenVestingDecisionCannotBeMade whenNotPaused internal returns(bool) {
+    require(!hasWithdrawn[_beneficiary]);
+    require(reserved[_beneficiary] > 0);
+    hasWithdrawn[_beneficiary] = true;
     // Initialize withdrawableAmount to the reservedAmount
-    uint256 withdrawableAmount = reservedAmount;
-    // If user chose to vest, set the withdrawable and reserved amounts
-    // proportional to the vested percentage
-    if (vesting[msg.sender]) {
+    if (hasVested[_beneficiary]) {
       // Calculate vested proportion as a reservedAmount / totalReservedForVesting
-      uint256 reservedAmountWithBonus = _calculateReserveWithBonus(msg.sender);
+      uint256 reservedAmountWithBonus = _calculateReserveWithBonus(_beneficiary, totalReservedForVesting);
       // set withdrawableAmount to initialBonus
-      withdrawableAmount = reservedAmountWithBonus.mul(initialBonusPercentage).div(precision);
+      withdrawable[_beneficiary] = reservedAmountWithBonus.mul(initialBonusPercentage).div(precision);
       // Reserve remaining tokens in TRS
-      uint256 remainingAmount = reservedAmountWithBonus.sub(withdrawableAmount);
-      require(TRSContract.reserveFor(msg.sender, remainingAmount));
-    }
-    // Clear the reserve registry so sender cannot withdraw multiple times
-    reserved[msg.sender] = 0;
-    if (tokenWithdrawalActivated) {
-      withdraws[msg.sender] = 0;
-      require(TRSContract.transferTokens(msg.sender, withdrawableAmount));
+      reserved[_beneficiary] = reservedAmountWithBonus.sub(withdrawable[_beneficiary]);
     }
     else {
-      withdraws[msg.sender] = withdrawableAmount;
+      withdrawable[_beneficiary] = reserved[_beneficiary];
+      // Clear the reserve registry for short-term investor
+      reserved[_beneficiary] = 0;
+    }
+    totalWithdrawable = totalWithdrawable.add(withdrawable[_beneficiary]);
+    if (tokenWithdrawalActivated) {
+      require(TRSContract.transferTokens(_beneficiary, withdrawable[_beneficiary]));
+      withdrawable[_beneficiary] = 0;
     }
     return true;
   }
 
-  function _performWithdraw(address _beneficiary) internal returns(bool) {
-    uint256 _tokens = withdraws[_beneficiary];
-    require(_tokens > 0);
-    withdraws[_beneficiary] = 0;
-    require(TRSContract.transferTokens(_beneficiary, _tokens));
+  function _performWithdraw(address _beneficiary) onlyOwner internal returns(bool) {
+    uint256 withdrawableAmount = withdrawable[_beneficiary];
+    withdrawable[_beneficiary] = 0;
+    require(TRSContract.transferTokens(_beneficiary, withdrawableAmount));
     return true;
   }
 
-  // TODO: BatchWithdraw
-
-}
-
-
-contract TokenReleaseScheduler is HasNoEther, Pausable {
-
-  using SafeMath for uint256;
-
-  mapping (address => bool) public authorized;
-
-  modifier auth() {
-    require((msg.sender == owner) || (authorized[msg.sender]));
-    _;
+  // BulkWithdraw
+  function bulkWithdraw(address[] addrs) onlyOwner public returns(bool) {
+    require(addrs.length <= 100);
+    for (uint i=0; i<addrs.length; i++) {
+      _performWithdraw(addrs[i]);
+    }
   }
 
-  function setAuthority(address _address) public onlyOwner returns(bool) {
-    authorized[_address] = true;
-    return true;
-  }
-
-  function removeAuthority(address _address) public onlyOwner returns(bool) {
-    authorized[_address] = false;
-    return true;
-  }
-
-  LendroidSupportToken public token;
-  uint256 public totalReserved;
-  mapping (address => uint256) public reserved;
-  mapping (address => uint256) public released;
-
-  address[] reservations;
-
-  uint256 public totalReleaseCycles;
-
-  // the total remaining value
-	uint public remainder;
-
-	/**
-	 * Total tokens owned by the contract after locking, and possibly
-	 * updated by the foundation after subsequent sales.
-	 */
-	uint public total;
-
-  uint constant public interval = 30 days;
-  uint constant public precision = 10 ** 18;
-  /**
-   * Events
-   */
-  event Released(address indexed toWhom, uint amount);
-  event Reserved(address indexed forWhom, uint amount);
-
-  bool public initialized;
-
-  bool public locked;
-  uint256 public startTime = 0;
-
-  uint256 public cyclicalBonusPercentage;
-
-  modifier preLock() { require(!locked && startTime == 0); _; }
-
-  /**
-   * Lock called, deposits no longer available.
-  */
-  modifier postLock() { require(locked); _; }
-
-  /**
-    * Prestart, state is after lock, before start
-    */
-  modifier preStart() { require(locked && startTime == 0); _; }
-
-  /**
-   * Start called, the savings contract is now finalized, and withdrawals
-   * are now permitted.
-   */
-  modifier postStart() { require(locked && startTime != 0); _; }
-
-  /**
-   * Uninitialized state, before init is called. Mainly used as a guard to
-   * finalize periods and t0special.
-   */
-  modifier setupIncomplete() { require(!initialized); _; }
-
-  /**
-   * Post initialization state, mainly used to guarantee that
-   * periods and t0special have been set properly before starting
-   * the withdrawal process.
-   */
-  modifier setupCompleted() { require(initialized); _; }
+  // Release logic
 
   /**
    * Initialization function, should be called after contract deployment. The
@@ -556,28 +562,26 @@ contract TokenReleaseScheduler is HasNoEther, Pausable {
    * periods and t0special are finalized, and effectively invariant, after
    * init is called for the first time.
    */
-  function setup(
+  function configureSchedule(
       uint256 _cycles,
-      uint256 _cyclicalBonusPercentage,
-      address _tokenAddress
-    ) public onlyOwner setupIncomplete
+      uint256 _cyclicalBonusPercentage
+    ) public onlyOwner scheduleConfigurationIncomplete
   {
   	require(_cycles != 0);
   	totalReleaseCycles = _cycles;
   	cyclicalBonusPercentage = _cyclicalBonusPercentage;
-  	token = LendroidSupportToken(_tokenAddress);
 	}
 
-  function completeSetup() public onlyOwner {
-    initialized = true;
+  function completeScheduleConfiguration() public onlyOwner {
+    scheduleConfigured = true;
   }
 
   /**
    * Lock is called by the owner to lock the savings contract
    * so that no more deposits may be made.
    */
-  function lock() public onlyOwner {
-	  locked = true;
+  function lockSchedule() public onlyOwner {
+	  scheduleLocked = true;
   }
 
   /**
@@ -585,19 +589,17 @@ contract TokenReleaseScheduler is HasNoEther, Pausable {
 	 * after lock(), once all of the bonus tokens are send to this contract,
 	 * and multiMint has been called.
 	 */
-	function start() onlyOwner setupCompleted preStart public {
-		startTime = now;
-		uint256 tokenBalance = token.balanceOf(this);
-		total = tokenBalance;
-		remainder = tokenBalance;
+	function startSchedule() onlyOwner scheduleConfigurationCompleted preScheduleStart public {
+    totalAvailableTokens = totalAvailableTokens.sub(totalWithdrawable);
+    scheduleStartTime = now;
 	}
 
 	/**
 	 * Check withdrawal is live, useful for checking whether
 	 * the savings contract is "live", withdrawal enabled, started.
 	 */
-	function isStarted() constant public returns(bool) {
-		return locked && startTime != 0;
+	function hasScheduleStarted() constant public returns(bool) {
+		return scheduleLocked && scheduleStartTime != 0;
 	}
 
   /**
@@ -610,23 +612,23 @@ contract TokenReleaseScheduler is HasNoEther, Pausable {
 	 * period == periods.
 	 *
 	 * NOTE: not guarded since no state modifications are made. However,
-	 * it will return invalid data before the postStart state. It is
+	 * it will return invalid data before the postScheduleStart state. It is
 	 * up to the user to manually check that the contract is in
-	 * postStart state.
+	 * postScheduleStart state.
 	 */
 	function cycleAt(uint256 _timestamp) constant public returns(uint256) {
 		/**
 		 * Lower bound, consider period 0 to be the time between
 		 * start() and startBlockTimestamp
 		 */
-		if (startTime > _timestamp)
+		if (scheduleStartTime > _timestamp)
 			return 0;
 
 		/**
 		 * Calculate the appropriate period, and set an upper bound of
 		 * periods - 1.
 		 */
-		uint256 c = ((_timestamp - startTime) / interval) + 1;
+		uint256 c = ((_timestamp - scheduleStartTime) / scheduleInterval) + 1;
 		if (c > totalReleaseCycles)
 			c = totalReleaseCycles;
 		return c;
@@ -638,50 +640,10 @@ contract TokenReleaseScheduler is HasNoEther, Pausable {
 		return cycleAt(now);
 	}
 
-  // reserve tokens to be released
-  function reserveFor(address _beneficiary, uint256 _tokens) public auth preLock whenNotPaused returns(bool) {
-    // sanity checks
-    require(_tokens > 0);
-    // Add _beneficiary to reservations list if they haven't been added already
-    if (reserved[_beneficiary] > 0) {
-      uint256 reservedAmount = reserved[_beneficiary];
-      totalReserved = totalReserved.sub(reservedAmount);
-    }
-    else {
-      reservations.push(_beneficiary);
-    }
-    reserved[_beneficiary] = _tokens;
-  	totalReserved = totalReserved.add(_tokens);
-  	Reserved(_beneficiary, _tokens);
-  	return true;
-  }
-
-  // transfer tokens
-  function transferTokens(address _beneficiary, uint256 tokens) public auth whenNotPaused returns(bool) {
-  	_performTokenTransfer(_beneficiary, tokens);
-  	return true;
-  }
-
-  // internal function that does actual transfer tokens
-  function _performTokenTransfer(address _beneficiary, uint256 tokens) internal {
-  	require(token.transfer(_beneficiary, tokens));
-  }
-
-  /**
-	 * Used to refund users who accidentaly transferred tokens to this
-	 * contract, only available before contract is locked
-	 */
-	function refundTokens(address addr, uint amount) onlyOwner preLock public returns(bool) {
-    require(reserved[addr] == 0);
-		_performTokenTransfer(addr, amount);
-    return true;
-	}
-
   function getTotalReservations() public constant returns(uint256) {
       return reservations.length;
   }
 
-  // Release logic
   // release releases tokens to the sender
 	// release can be called at most once per release cycle
 	function release() whenNotPaused public returns(bool) {
@@ -689,14 +651,14 @@ contract TokenReleaseScheduler is HasNoEther, Pausable {
 	}
 
 	/**
-	 * Calculates the fraction of total (one-off + monthly) withdrawable
+	 * Calculates the fraction of total (one-off + monthly) withdrawableAmount
 	 * given the current timestamp. No guards due to function being constant.
-	 * Will output invalid data until the postStart state. It is up to the user
-	 * to manually confirm contract is in postStart state.
+	 * Will output invalid data until the postScheduleStart state. It is up to the user
+	 * to manually confirm contract is in postScheduleStart state.
 	 */
 	function availableForReleaseAt(uint256 _timestamp) constant public returns (uint256) {
 		/**
-		 * Calculate the total withdrawable, giving a numerator with range:
+		 * Calculate the total withdrawableAmount, giving a numerator with range:
 		 * [0.25 * 10 ** 18, 1 * 10 ** 18]
 		 */
 		return (cycleAt(_timestamp) * precision) / (totalReleaseCycles);
@@ -708,14 +670,13 @@ contract TokenReleaseScheduler is HasNoEther, Pausable {
 	 * blockchain model.
 	 *
 	 * NOTE: Since function is constant, no guards are applied. This function will give
-	 * invalid outputs unless in postStart state. It is up to user to manually check
+	 * invalid outputs unless in postScheduleStart state. It is up to user to manually check
 	 * that the correct state is given (isStart() == true)
 	 */
 	function _releaseTo(
       uint256 _reservedAmount,
       uint256 _withdrawnAmount,
-      uint256 _timestamp,
-      uint256 _total
+      uint256 _timestamp
     )
     constant public returns (uint256)
   {
@@ -738,11 +699,11 @@ contract TokenReleaseScheduler is HasNoEther, Pausable {
 		 *
 		 * The maximum for a uint256 is = 1.15 * (10 ** 77)
 		 */
-		uint256 withdrawable = ((_reservedAmount * fraction * _total) / totalReserved) / precision;
+		uint256 withdrawableAmount = _reservedAmount.mul(fraction).div(precision);
 
 		// check that we can withdraw something
-		if (withdrawable > _withdrawnAmount) {
-			return withdrawable - _withdrawnAmount;
+		if (withdrawableAmount > _withdrawnAmount) {
+			return withdrawableAmount - _withdrawnAmount;
 		}
 		return 0;
 	}
@@ -751,11 +712,11 @@ contract TokenReleaseScheduler is HasNoEther, Pausable {
 	 * Public facing releaseTo, injects business logic with
 	 * the correct model.
 	 */
-	function releaseTo(address addr) postStart whenNotPaused public returns (bool) {
-		uint _reservedAmount = reserved[addr];
-		uint _releasedAmount = released[addr];
+	function releaseTo(address addr) postScheduleStart whenNotPaused public returns (bool) {
+		uint256 _reservedAmount = reserved[addr];
+		uint256 _releasedAmount = released[addr];
 
-		uint diff = _releaseTo(_reservedAmount, _releasedAmount, now, total);
+		uint256 diff = _releaseTo(_reservedAmount, _releasedAmount, now);
 
 		// release could not be made
 		if (diff == 0) {
@@ -763,13 +724,13 @@ contract TokenReleaseScheduler is HasNoEther, Pausable {
 		}
 
 		// check that we cannot withdraw more than max
-		require((diff + _releasedAmount) <= ((_reservedAmount * total) / totalReserved));
+		require((diff + _releasedAmount) <= _reservedAmount);
 
 		// transfer and increment
-    _performTokenTransfer(addr, diff);
+    require(TRSContract.transferTokens(addr, diff));
 
 		released[addr] = released[addr].add(diff);
-		remainder = remainder.sub(diff);
+		totalAvailableTokens = totalAvailableTokens.sub(diff);
 		Released(addr, diff);
 		return true;
 	}
@@ -779,5 +740,47 @@ contract TokenReleaseScheduler is HasNoEther, Pausable {
 		for (uint i=0; i<addrs.length; i++)
 			releaseTo(addrs[i]);
 	}
+
+  /**
+	 * Used to refund users who accidentaly transferred tokens to this
+	 * contract, only available before contract is scheduleLocked
+	 */
+	function refundTokens(address addr, uint amount) onlyOwner preScheduleLock public returns(bool) {
+    require(reserved[addr] == 0);
+		require(TRSContract.transferTokens(addr, amount));
+    return true;
+	}
+
+}
+
+
+contract TRS is HasNoEther, Pausable {
+
+  using SafeMath for uint256;
+
+  LendroidSupportToken public token;
+
+  mapping (address => bool) public authorized;
+
+  modifier auth() {
+    require((msg.sender == owner) || (authorized[msg.sender]));
+    _;
+  }
+
+  function setAuthority(address _address) public onlyOwner returns(bool) {
+    authorized[_address] = true;
+    return true;
+  }
+
+  function removeAuthority(address _address) public onlyOwner returns(bool) {
+    authorized[_address] = false;
+    return true;
+  }
+
+  // transfer tokens
+  function transferTokens(address _beneficiary, uint256 tokens) public auth whenNotPaused returns(bool) {
+  	require(token.transfer(_beneficiary, tokens));
+  	return true;
+  }
 
 }
