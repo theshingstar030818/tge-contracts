@@ -406,27 +406,29 @@ contract PrivateSale is BaseSale {
     _performReserve(beneficiary, msg.value);
   }
 
-  function _performReserve(address beneficiary, uint256 weiAmount) whileSaleIsActive whenNotPaused internal {
-    require(!hasVested[beneficiary]);
-    require(beneficiary != address(0));
+  function _performReserve(address _beneficiary, uint256 weiAmount) whileSaleIsActive whenNotPaused internal {
+    require(_beneficiary != address(0));
     require(validPurchase());
     // Validate contributor has been whitelisted
-    require(whitelist.isWhitelisted(beneficiary));
+    require(whitelist.isWhitelisted(_beneficiary));
 
     // update state
-    totalWeiContributed[beneficiary] = totalWeiContributed[beneficiary].add(weiAmount);
-    require(totalWeiContributed[beneficiary] <= individualCap);
+    totalWeiContributed[_beneficiary] = totalWeiContributed[_beneficiary].add(weiAmount);
+    require(totalWeiContributed[_beneficiary] <= individualCap);
     weiRaised = weiRaised.add(weiAmount);
     require(weiRaised <= totalCap);
 
     // Save the contribution for future reference
-    saveContribution(beneficiary, weiAmount);
+    saveContribution(_beneficiary, weiAmount);
     // calculate token amount to be created
     // Mint LST into beneficiary account
     uint256 tokens = weiAmount.mul(rate);
-    reserved[beneficiary] = reserved[beneficiary].add(tokens);
+    reserved[_beneficiary] = reserved[_beneficiary].add(tokens);
+    if (hasVested[_beneficiary]) {
+      totalReservedForVesting = totalReservedForVesting.add(tokens);
+    }
     /* totalPurchased = totalPurchased.add(tokens); */
-    TokenPurchase(beneficiary, weiAmount, tokens);
+    TokenPurchase(_beneficiary, weiAmount, tokens);
 
     forwardFunds();
   }
@@ -477,6 +479,35 @@ contract PrivateSale is BaseSale {
     }
   }
 
+  // Vesting
+  function vest(bool _decision) public returns(bool) {
+    return _vest(msg.sender, _decision);
+  }
+
+  // Low-level vesting logic
+  // The following cases are checked for _beneficiary's actions:
+  // 1. Had chosen not to vest previously, and chooses not to vest now
+  // 2. Had chosen not to vest previously, and chooses to vest now
+  // 3. Had chosen to vest previously, and chooses not to vest now
+  // 4. Had chosen to vest previously, and chooses to vest now
+  // 2 & 3 are valid cases
+  // 1 and 4 are invalid because they are double-vesting actions
+  function _vest(address _beneficiary, bool _decision) whileVestingDecisionCanBeMade whenNotPaused internal returns(bool) {
+    // Prevent double vesting
+    bool doubleVesingDecision = hasVested[_beneficiary] && _decision;
+    bool doubleNonVestingDecision = !hasVested[_beneficiary] && !_decision;
+    require(!doubleVesingDecision || !doubleNonVestingDecision);
+    // Update totalReservedForVesting based on vesting decision
+    if (_decision) {
+      totalReservedForVesting = totalReservedForVesting.add(reserved[_beneficiary]);
+    }
+    else {
+      totalReservedForVesting = totalReservedForVesting.sub(reserved[_beneficiary]);
+    }
+    hasVested[_beneficiary] = _decision;
+    return true;
+  }
+
   // Low-level bonus calculation
   function _calculateReserveWithBonus(address _beneficiary, uint256 totalVested) internal constant returns(uint256) {
     uint256 reservedAmount = reserved[_beneficiary];
@@ -485,32 +516,11 @@ contract PrivateSale is BaseSale {
     return reservedAmountWithBonus;
   }
 
-  function expectedTokensWithBonus(address _beneficiary) constant public returns(uint256) {
-    uint256 reservedAmount = reserved[_beneficiary];
-    uint256 expectedTotalVestingAmount = totalReservedForVesting;
-    expectedTotalVestingAmount = expectedTotalVestingAmount.add(reservedAmount);
-    return _calculateReserveWithBonus(_beneficiary, expectedTotalVestingAmount);
-  }
-
-  // Vesting
-  function vest(bool _decision) public returns(bool) {
-    return _vest(msg.sender, _decision);
-  }
-
-  // Low-level bonus calculation
-  function _vest(address _beneficiary, bool _decision) whileVestingDecisionCanBeMade whenNotPaused internal returns(bool) {
-    // Ensure user does not double-vest
-    require(!hasVested[_beneficiary]);
-    require(reserved[_beneficiary] > 0);
-    totalReservedForVesting = totalReservedForVesting.add(reserved[_beneficiary]);
-    hasVested[_beneficiary] = _decision;
-    return true;
-  }
-
   function withdraw() public returns(bool) {
     return _withdraw(msg.sender);
   }
 
+  // Low-level withdraw logic
   function _withdraw(address _beneficiary) afterSaleHasEnded whenVestingDecisionCannotBeMade whenNotPaused internal returns(bool) {
     require(!hasWithdrawn[_beneficiary]);
     require(reserved[_beneficiary] > 0);
