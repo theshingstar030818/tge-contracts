@@ -59,7 +59,7 @@ contract ContributorWhitelist is HasNoEther {
 /**
  * @title BaseSale
  * @dev BaseSale is a base contract for managing a token crowdsale.
- * Investors can make token purchases and (if the canMint option is true)
+ * contributors can make token purchases and (if the canMint option is true)
  * the conact will assign them tokens based on a token per ETH rate.
  * Funds collected are forwarded to a coldStorageWallet as they arrive.
  */
@@ -275,7 +275,7 @@ contract PrivateSale is BaseSale {
   // total bonus at end of sale
   /* uint256 public totalPurchased; */
   uint256 public totalReservedForVesting;
-  uint256 public totalWithdrawable;
+  uint256 public totalWithdrawableBeforeTRS;
   // Bonus counters
   uint256 public totalAvailableTokens;
   uint256 public initialBonusPercentage;
@@ -286,7 +286,7 @@ contract PrivateSale is BaseSale {
   mapping (address => uint256) public reserved;
   mapping (address => bool) public hasVested;
   mapping (address => uint256) public released;
-  mapping (address => bool) public hasWithdrawn;
+  mapping (address => bool) public hasWithdrawnBeforeTRS;
 
   // withdrawable LST after end of sale
   mapping (address => uint256) public withdrawable;
@@ -332,7 +332,7 @@ contract PrivateSale is BaseSale {
   modifier preScheduleStart() { require(scheduleLocked && scheduleStartTime == 0); _; }
 
   /**
-   * Start called, the savings contract is now finalized, and withdrawals
+   * Start called, the TRS contract is now finalized, and withdrawals
    * are now permitted.
    */
   modifier postScheduleStart() { require(scheduleLocked && scheduleStartTime != 0); _; }
@@ -423,14 +423,21 @@ contract PrivateSale is BaseSale {
     // calculate token amount to be created
     // Mint LST into beneficiary account
     uint256 tokens = weiAmount.mul(rate);
+    _reserveFunds(_beneficiary, tokens);
+    TokenPurchase(_beneficiary, weiAmount, tokens);
+    forwardFunds();
+  }
+
+  function reserveFundsForAddress(address _beneficiary, uint256 tokens) onlyOwner public returns(bool) {
+    _reserveFunds(_beneficiary, tokens);
+    return true;
+  }
+
+  function _reserveFunds(address _beneficiary, uint256 tokens) internal {
     reserved[_beneficiary] = reserved[_beneficiary].add(tokens);
     if (hasVested[_beneficiary]) {
       totalReservedForVesting = totalReservedForVesting.add(tokens);
     }
-    /* totalPurchased = totalPurchased.add(tokens); */
-    TokenPurchase(_beneficiary, weiAmount, tokens);
-
-    forwardFunds();
   }
 
   function bulkReserve(address[] addrs, uint256[] weiAmounts) onlyOwner public returns(bool) {
@@ -517,14 +524,25 @@ contract PrivateSale is BaseSale {
   }
 
   function withdraw() public returns(bool) {
-    return _withdraw(msg.sender);
+    if (now > saleEndTime && now.sub(saleEndTime) > TRSOffset) {
+      return _withdrawBeforeTRS(msg.sender);
+    }
+    _withdraw(msg.sender);
+    return true;
+  }
+
+  function _withdraw(address _beneficiary) internal returns(bool) {
+    if (tokenWithdrawalActivated && withdrawable[_beneficiary] > 0) {
+      require(TRSContract.transferTokens(_beneficiary, withdrawable[_beneficiary]));
+      withdrawable[_beneficiary] = 0;
+    }
   }
 
   // Low-level withdraw logic
-  function _withdraw(address _beneficiary) afterSaleHasEnded whenVestingDecisionCannotBeMade whenNotPaused internal returns(bool) {
-    require(!hasWithdrawn[_beneficiary]);
+  function _withdrawBeforeTRS(address _beneficiary) afterSaleHasEnded whenVestingDecisionCannotBeMade whenNotPaused internal returns(bool) {
+    require(!hasWithdrawnBeforeTRS[_beneficiary]);
     require(reserved[_beneficiary] > 0);
-    hasWithdrawn[_beneficiary] = true;
+    hasWithdrawnBeforeTRS[_beneficiary] = true;
     // Initialize withdrawableAmount to the reservedAmount
     if (hasVested[_beneficiary]) {
       // Calculate vested proportion as a reservedAmount / totalReservedForVesting
@@ -536,14 +554,11 @@ contract PrivateSale is BaseSale {
     }
     else {
       withdrawable[_beneficiary] = reserved[_beneficiary];
-      // Clear the reserve registry for short-term investor
+      // Clear the reserve registry for unvested contributor
       reserved[_beneficiary] = 0;
     }
-    totalWithdrawable = totalWithdrawable.add(withdrawable[_beneficiary]);
-    if (tokenWithdrawalActivated) {
-      require(TRSContract.transferTokens(_beneficiary, withdrawable[_beneficiary]));
-      withdrawable[_beneficiary] = 0;
-    }
+    totalWithdrawableBeforeTRS = totalWithdrawableBeforeTRS.add(withdrawable[_beneficiary]);
+    _withdraw(_beneficiary);
     return true;
   }
 
@@ -587,7 +602,7 @@ contract PrivateSale is BaseSale {
   }
 
   /**
-   * Lock is called by the owner to lock the savings contract
+   * Lock is called by the owner to lock the TRS contract
    * so that no more deposits may be made.
    */
   function lockSchedule() public onlyOwner {
@@ -595,18 +610,18 @@ contract PrivateSale is BaseSale {
   }
 
   /**
-	 * Starts the distribution of savings, it should be called
+	 * Starts the distribution of reserved tokens, it should be called
 	 * after lock(), once all of the bonus tokens are send to this contract,
 	 * and multiMint has been called.
 	 */
 	function startSchedule() onlyOwner scheduleConfigurationCompleted preScheduleStart public {
-    totalAvailableTokens = totalAvailableTokens.sub(totalWithdrawable);
+    totalAvailableTokens = totalAvailableTokens.sub(totalWithdrawableBeforeTRS);
     scheduleStartTime = now;
 	}
 
 	/**
 	 * Check withdrawal is live, useful for checking whether
-	 * the savings contract is "live", withdrawal enabled, started.
+	 * the TRS contract is "live", withdrawal enabled, started.
 	 */
 	function hasScheduleStarted() constant public returns(bool) {
 		return scheduleLocked && scheduleStartTime != 0;
@@ -737,7 +752,12 @@ contract PrivateSale is BaseSale {
 		require((diff + _releasedAmount) <= _reservedAmount);
 
 		// transfer and increment
-    require(TRSContract.transferTokens(addr, diff));
+    if (tokenWithdrawalActivated) {
+      require(TRSContract.transferTokens(addr, diff));
+    }
+    else {
+      withdrawable[addr] = diff;
+    }
 
 		released[addr] = released[addr].add(diff);
 		totalAvailableTokens = totalAvailableTokens.sub(diff);
