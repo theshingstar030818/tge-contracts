@@ -196,7 +196,7 @@ contract BaseSaleContract is Pausable {
   }
 
   // @return true if crowdsale event has ended
-  function hasEnded() public view returns (bool) {
+  function hasEnded() external view returns (bool) {
     return now > publicSaleEndTime;
   }
 
@@ -277,44 +277,20 @@ contract BaseSaleContract is Pausable {
 contract Sale is BaseSaleContract {
 
   // External contracts
-  TokenVault public TRSContract;
-  TokenReleaser public TokenReleaserContract;
+  TokenVault public TokenVaultContract;
+  TRS public TRSContract;
   SaleAdmin public SaleAdminContract;
 
   uint256 constant public precision = 10 ** 18;
-  uint256 public TRSOffset;
-  bool public tokenWithdrawalActivated;
-
-  // Total LSTs that would be reserved during the sale. Useful for calculating
-  // total bonus at end of sale
-  uint256 private totalReservedForVesting;
-  uint256 private totalWithdrawableBeforeTRS;
-  // Bonus counters
-  uint256 private totalAvailableTokens;
-  uint256 public initialVestedReleasePercentage;
-  uint256 private bonusMultiplier;
-
-  // addresses for whom LSTs will be reserved following purchase
-  mapping (address => uint256) private reservedTokens;
   mapping (address => bool) private hasVested;
-  mapping (address => uint256) private releasedTokens;
-  mapping (address => bool) private hasWithdrawnBeforeTRS;
-
-  // withdrawable LST after end of sale
-  mapping (address => uint256) private withdrawable;
 
   modifier onlySaleAdmin() {
     require((address(SaleAdminContract) != 0) && (msg.sender == address(SaleAdminContract)));
     _;
   }
 
-  modifier onlyTokenReleaser() {
-    require((address(TokenReleaserContract) != 0) && (msg.sender == address(TokenReleaserContract)));
-    _;
-  }
-
-  modifier whileVestingDecisionCanBeMade() {
-    require((now <= publicSaleEndTime) || ((now > publicSaleEndTime) && (now.sub(publicSaleEndTime) <= TRSOffset)));
+  modifier onlyTRS() {
+    require((address(TRSContract) != 0) && (msg.sender == address(TRSContract)));
     _;
   }
 
@@ -323,8 +299,6 @@ contract Sale is BaseSaleContract {
     uint256 _rate,
     address _wallet,
     address _whitelist,
-    uint256 _totalLST,
-    uint256 _initialBonusPercentage,
     uint256 _publicSaleStartTime, uint256 _publicSaleEndTime
   ) onlyOwner external returns(bool) {
     require(_publicSaleStartTime >= now);
@@ -341,15 +315,11 @@ contract Sale is BaseSaleContract {
 
     totalCap = 25000 * precision;
     individualCap = 5000 * precision;
-    TRSOffset = 7 days;
-    tokenWithdrawalActivated = false;
-    totalAvailableTokens = _totalLST * precision;
-    initialVestedReleasePercentage = _initialBonusPercentage;
     return true;
   }
 
-  function setTRSContract(address _address) onlyOwner external returns(bool) {
-      TRSContract = TokenVault(_address);
+  function setTokenVaultContract(address _address) onlyOwner external returns(bool) {
+      TokenVaultContract = TokenVault(_address);
       return true;
   }
 
@@ -358,24 +328,13 @@ contract Sale is BaseSaleContract {
       return true;
   }
 
-  function setTokenReleaserContract(address _address) onlyOwner external returns(bool) {
-    TokenReleaserContract = TokenReleaser(_address);
+  function setTRSContract(address _address) onlyOwner external returns(bool) {
+    TRSContract = TRS(_address);
     return true;
   }
 
-  function setTokenWithdrawalActivation(bool _value) onlyOwner external returns(bool) {
-      tokenWithdrawalActivated = _value;
-      return true;
-  }
-
-  function setTRSOffset(uint256 _offset) onlyOwner external returns(bool) {
-      TRSOffset = _offset;
-      return true;
-  }
-
-  function setBonusMultiplier() onlyOwner external returns(bool) {
-      bonusMultiplier = totalAvailableTokens.mul(initialVestedReleasePercentage).div(totalReservedForVesting);
-      return true;
+  function saveContributionFor(address _beneficiary, uint256 _weiAmount, bool _isPrivateSale) external onlyTRS {
+    saveContribution(_beneficiary, _weiAmount, _isPrivateSale);
   }
 
   // fallback function can be used to buy tokens
@@ -406,21 +365,9 @@ contract Sale is BaseSaleContract {
     // calculate token amount to be created
     // Mint LST into beneficiary account
     uint256 tokens = weiAmount.mul(rate);
-    reservedTokens[_beneficiary] = reservedTokens[_beneficiary].add(tokens);
-    if (hasVested[_beneficiary]) {
-      totalReservedForVesting = totalReservedForVesting.add(tokens);
-    }
+    bool vestingDecision = hasVested[_beneficiary];
+    TRSContract.updateReservedTokens(_beneficiary, tokens, vestingDecision, false);
     forwardFunds();
-  }
-
-  function reserveTokensForAddress(address _beneficiary, uint256 _tokens, bool _vestingDecision, bool _isPrivateSale) external onlySaleAdmin returns(bool) {
-    if (_vestingDecision) {
-        hasVested[_beneficiary] = true;
-        totalReservedForVesting = totalReservedForVesting.add(_tokens);
-      }
-    saveContribution(_beneficiary, 0, _isPrivateSale);
-    reservedTokens[_beneficiary] = reservedTokens[_beneficiary].add(_tokens);
-    return true;
   }
 
   // Vesting logic
@@ -431,80 +378,32 @@ contract Sale is BaseSaleContract {
   // 4. Had chosen to vest previously, and chooses to vest now
   // 2 & 3 are valid cases
   // 1 and 4 are invalid because they are double-vesting actions
-  function vest(bool _decision) whileVestingDecisionCanBeMade whenNotPaused external returns(bool) {
+  function vest(bool _decision) whenNotPaused external returns(bool) {
+    bool periodDuringPublicSale = now <= publicSaleEndTime;
+    bool periodDuringTRSOffset = (now > publicSaleEndTime) && (now.sub(publicSaleEndTime) <= TRSContract.TRSOffset());
+    require(periodDuringPublicSale || periodDuringTRSOffset);
     // Prevent double vesting
     bool doubleVesingDecision = hasVested[msg.sender] && _decision;
     bool doubleNonVestingDecision = !hasVested[msg.sender] && !_decision;
     require(!doubleVesingDecision || !doubleNonVestingDecision);
     // Update totalReservedForVesting based on vesting decision
-    if (_decision) {
-      totalReservedForVesting = totalReservedForVesting.add(reservedTokens[msg.sender]);
-    }
-    else {
-      totalReservedForVesting = totalReservedForVesting.sub(reservedTokens[msg.sender]);
-    }
+    require(TRSContract.updateReservedTokens(msg.sender, 0, _decision, true));
     hasVested[msg.sender] = _decision;
     return true;
   }
 
-  function withdraw() external whenNotPaused returns(bool) {
-    if (now > publicSaleEndTime && now.sub(publicSaleEndTime) > TRSOffset) {
-      require(!hasWithdrawnBeforeTRS[msg.sender]);
-      require(reservedTokens[msg.sender] > 0);
-      hasWithdrawnBeforeTRS[msg.sender] = true;
-      // Initialize withdrawableAmount to the reservedAmount
-      if (hasVested[msg.sender]) {
-        // Calculate vested proportion as a reservedAmount / totalReservedForVesting
-        assert(bonusMultiplier != 0);
-        uint256 reservedAmountWithBonus = reservedTokens[msg.sender].mul(bonusMultiplier).div(precision);
-        // set withdrawableAmount to initialBonus
-        withdrawable[msg.sender] = reservedAmountWithBonus;
-        // Reserve remaining tokens in TRS
-        reservedTokens[msg.sender] = reservedAmountWithBonus.sub(withdrawable[msg.sender]);
-      }
-      else {
-        withdrawable[msg.sender] = reservedTokens[msg.sender];
-        // Clear the reserve registry for unvested contributor
-        reservedTokens[msg.sender] = 0;
-      }
-      totalWithdrawableBeforeTRS = totalWithdrawableBeforeTRS.add(withdrawable[msg.sender]);
-    //   _withdraw(msg.sender);
-    //   return true;
+  /* function reserveTokensForAddress(address _beneficiary, uint256 _tokens, bool _vestingDecision, bool _isPrivateSale) external onlySaleAdmin returns(bool) {
+    if (_vestingDecision) {
+      hasVested[_beneficiary] = true;
+      totalReservedForVesting = totalReservedForVesting.add(_tokens);
     }
-    if (tokenWithdrawalActivated && withdrawable[msg.sender] > 0) {
-      require(TRSContract.transferTokens(msg.sender, withdrawable[msg.sender]));
-      withdrawable[msg.sender] = 0;
-    }
+    saveContributionFor(_beneficiary, 0, _isPrivateSale);
+    reservedTokens[_beneficiary] = reservedTokens[_beneficiary].add(_tokens);
     return true;
-  }
+  } */
 
-  function cyclicalWithdraw(address _beneficiary, uint _tokens) external onlyTokenReleaser whenNotPaused returns(bool) {
-    if (tokenWithdrawalActivated) {
-      require(TRSContract.transferTokens(_beneficiary, _tokens));
-    }
-    else {
-      withdrawable[_beneficiary] = _tokens;
-    }
-    releasedTokens[_beneficiary] = releasedTokens[_beneficiary].add(_tokens);
-    totalAvailableTokens = totalAvailableTokens.sub(_tokens);
-    return true;
-  }
-
-  function startReleaseSchedule() onlyTokenReleaser external whenNotPaused returns(bool) {
-    totalAvailableTokens = totalAvailableTokens.sub(totalWithdrawableBeforeTRS);
-    return true;
-  }
-
-  function releaseStats(address _beneficiary) onlyTokenReleaser external view whenNotPaused returns(uint256, uint256) {
-    return (reservedTokens[_beneficiary], releasedTokens[_beneficiary]);
-  }
-
-  function withdrawTo(address _beneficiary) onlySaleAdmin external whenNotPaused returns(bool) {
-    if (tokenWithdrawalActivated && withdrawable[_beneficiary] > 0) {
-      require(TRSContract.transferTokens(_beneficiary, withdrawable[_beneficiary]));
-      withdrawable[_beneficiary] = 0;
-    }
-    return true;
+  function isVestedContributor(address _beneficiary) external view onlyTRS returns(bool) {
+    return hasVested[_beneficiary];
   }
 
 }
@@ -512,27 +411,32 @@ contract Sale is BaseSaleContract {
 
 contract SaleAdmin is HasNoEther, Destructible {
   Sale public SaleContract;
+  TRS public TRSContract;
 
   function setSaleContract(address _address) onlyOwner external returns(bool) {
       SaleContract = Sale(_address);
       return true;
   }
 
+  function setTRSContract(address _address) onlyOwner external returns(bool) {
+      TRSContract = TRS(_address);
+      return true;
+  }
 
-   function bulkReserveTokensForAddresses(address[] addrs, uint256[] tokenAmounts, bool[] _vestingDecisions) onlyOwner external returns(bool) {
+   /* function bulkReserveTokensForAddresses(address[] addrs, uint256[] tokenAmounts, bool[] _vestingDecisions) onlyOwner external returns(bool) {
      require(addrs.length <= 100);
      require((addrs.length == tokenAmounts.length) && (addrs.length == _vestingDecisions.length));
      bool _isPrivateSale = now < SaleContract.publicSaleStartTime();
      for (uint i=0; i<addrs.length; i++) {
-       SaleContract.reserveTokensForAddress(addrs[i], tokenAmounts[i], _vestingDecisions[i], _isPrivateSale);
+       TRSContract.reserveTokensForAddress(addrs[i], tokenAmounts[i], _vestingDecisions[i], _isPrivateSale);
      }
-   }
+   } */
 
   // BulkWithdraw
   function bulkWithdraw(address[] addrs) onlyOwner external returns(bool) {
     require(addrs.length <= 100);
     for (uint i=0; i<addrs.length; i++) {
-      require(SaleContract.withdrawTo(addrs[i]));
+      require(TRSContract.withdrawTo(addrs[i]));
     }
     return true;
   }
@@ -540,13 +444,16 @@ contract SaleAdmin is HasNoEther, Destructible {
 }
 
 
-contract TokenReleaser is HasNoEther, Pausable, Destructible {
+contract TRS is HasNoEther, Pausable, Destructible {
 
   using SafeMath for uint256;
 
   // External contracts
   Sale public SaleContract;
-  TokenVault public TRSContract;
+  TokenVault public TokenVaultContract;
+  SaleAdmin public SaleAdminContract;
+
+  mapping (address => bool) private hasWithdrawnBeforeTRS;
 
   // TRS Schedule counters
   uint256 public totalReleaseCycles;
@@ -555,6 +462,35 @@ contract TokenReleaser is HasNoEther, Pausable, Destructible {
   bool public scheduleLocked;
   uint256 public scheduleStartTime = 0;
   uint256 public cyclicalVestedReleasePercentage;
+
+  uint256 public TRSOffset = 7 days;
+  bool public tokenWithdrawalActivated = false;
+
+  // Total LSTs that would be reserved during the sale. Useful for calculating
+  // total bonus at end of sale
+  uint256 private totalReservedForVesting;
+  uint256 private totalWithdrawableBeforeTRS;
+  // Bonus counters
+  uint256 private totalAvailableTokens;
+  uint256 public initialVestedReleasePercentage;
+  uint256 private bonusMultiplier;
+
+  // addresses for whom LSTs will be reserved following purchase
+  mapping (address => uint256) private reservedTokens;
+  mapping (address => uint256) private releasedTokens;
+
+  // withdrawable LST after end of sale
+  mapping (address => uint256) private withdrawable;
+
+  modifier onlySale() {
+    require((address(SaleContract) != 0) && (msg.sender == address(SaleContract)));
+    _;
+  }
+
+  modifier onlySaleAdmin() {
+    require((address(SaleAdminContract) != 0) && (msg.sender == address(SaleAdminContract)));
+    _;
+  }
 
   modifier preScheduleLock() { require(!scheduleLocked && scheduleStartTime == 0); _; }
 
@@ -587,14 +523,98 @@ contract TokenReleaser is HasNoEther, Pausable, Destructible {
    */
   modifier scheduleConfigurationCompleted() { require(scheduleConfigured); _; }
 
+  function init(uint256 _totalLST, uint256 _initialBonusPercentage) onlyOwner external returns(bool) {
+    totalAvailableTokens = _totalLST * SaleContract.precision();
+    initialVestedReleasePercentage = _initialBonusPercentage;
+  }
+
   function setSaleContract(address _address) onlyOwner external returns(bool) {
       SaleContract = Sale(_address);
       return true;
   }
 
-  function setTRSContract(address _address) onlyOwner external returns(bool) {
-      TRSContract = TokenVault(_address);
+  function setTokenVaultContract(address _address) onlyOwner external returns(bool) {
+      TokenVaultContract = TokenVault(_address);
       return true;
+  }
+
+  function setSaleAdminContract(address _address) onlyOwner external returns(bool) {
+      SaleAdminContract = SaleAdmin(_address);
+      return true;
+  }
+
+  function setTokenWithdrawalActivation(bool _value) onlyOwner external returns(bool) {
+      tokenWithdrawalActivated = _value;
+      return true;
+  }
+
+  function setTRSOffset(uint256 _offset) onlyOwner external returns(bool) {
+      TRSOffset = _offset;
+      return true;
+  }
+
+  function setBonusMultiplier() onlyOwner external returns(bool) {
+      bonusMultiplier = totalAvailableTokens.mul(initialVestedReleasePercentage).div(totalReservedForVesting);
+      return true;
+  }
+
+  function updateReservedTokens(address _beneficiary, uint256 _tokens, bool _vestingDecision, bool _updateOnlyTotal) external onlySale returns(bool) {
+    if (_updateOnlyTotal) {
+      if (_vestingDecision) {
+        totalReservedForVesting = totalReservedForVesting.add(reservedTokens[_beneficiary]);
+      }
+      else {
+        totalReservedForVesting = totalReservedForVesting.sub(reservedTokens[_beneficiary]);
+      }
+    }
+    else {
+      reservedTokens[_beneficiary] = reservedTokens[_beneficiary].add(_tokens);
+      if (_vestingDecision) {
+        totalReservedForVesting = totalReservedForVesting.add(_tokens);
+      }
+    }
+  }
+
+  function withdraw() external whenNotPaused returns(bool) {
+    uint256 publicSaleEndTime = SaleContract.publicSaleEndTime();
+    if (now > publicSaleEndTime && now.sub(publicSaleEndTime) > TRSOffset) {
+      require(!hasWithdrawnBeforeTRS[msg.sender]);
+      require(reservedTokens[msg.sender] > 0);
+      hasWithdrawnBeforeTRS[msg.sender] = true;
+      // Initialize withdrawableAmount to the reservedAmount
+      if (SaleContract.isVestedContributor(msg.sender)) {
+        // Calculate vested proportion as a reservedAmount / totalReservedForVesting
+        assert(bonusMultiplier != 0);
+        uint256 reservedAmountWithBonus = reservedTokens[msg.sender].mul(bonusMultiplier).div(SaleContract.precision());
+        // set withdrawableAmount to initialBonus
+        withdrawable[msg.sender] = reservedAmountWithBonus;
+        // Reserve remaining tokens in TRS
+        reservedTokens[msg.sender] = reservedAmountWithBonus.sub(withdrawable[msg.sender]);
+      }
+      else {
+        withdrawable[msg.sender] = reservedTokens[msg.sender];
+        // Clear the reserve registry for unvested contributor
+        reservedTokens[msg.sender] = 0;
+      }
+      totalWithdrawableBeforeTRS = totalWithdrawableBeforeTRS.add(withdrawable[msg.sender]);
+    }
+    if (tokenWithdrawalActivated && withdrawable[msg.sender] > 0) {
+      require(TokenVaultContract.transferTokens(msg.sender, withdrawable[msg.sender]));
+      withdrawable[msg.sender] = 0;
+    }
+    return true;
+  }
+
+  function releaseStats(address _beneficiary) external view whenNotPaused returns(uint256, uint256) {
+    return (reservedTokens[_beneficiary], releasedTokens[_beneficiary]);
+  }
+
+  function withdrawTo(address _beneficiary) onlySaleAdmin external whenNotPaused returns(bool) {
+    if (tokenWithdrawalActivated && withdrawable[_beneficiary] > 0) {
+      require(TokenVaultContract.transferTokens(_beneficiary, withdrawable[_beneficiary]));
+      withdrawable[_beneficiary] = 0;
+    }
+    return true;
   }
 
   // Release logic
@@ -635,7 +655,7 @@ contract TokenReleaser is HasNoEther, Pausable, Destructible {
 	 * and multiMint has been called.
 	 */
 	function startSchedule() onlyOwner scheduleConfigurationCompleted preScheduleStart external returns(bool) {
-    require(SaleContract.startReleaseSchedule());
+    totalAvailableTokens = totalAvailableTokens.sub(totalWithdrawableBeforeTRS);
     scheduleStartTime = now;
     return true;
 	}
@@ -755,9 +775,8 @@ contract TokenReleaser is HasNoEther, Pausable, Destructible {
 	 * the correct model.
 	 */
 	function releaseTo(address addr) postScheduleStart whenNotPaused public returns (bool) {
-		uint256 _reservedAmount;
-    uint256 _releasedAmount;
-    (_reservedAmount, _releasedAmount) = SaleContract.releaseStats(addr);
+		uint256 _reservedAmount = reservedTokens[addr];
+    uint256 _releasedAmount = releasedTokens[addr];
 
 		uint256 diff = _releaseTo(_reservedAmount, _releasedAmount, now);
 
@@ -770,7 +789,14 @@ contract TokenReleaser is HasNoEther, Pausable, Destructible {
 		require((diff + _releasedAmount) <= _reservedAmount);
 
 		// transfer and increment
-    require(SaleContract.cyclicalWithdraw(addr, diff));
+    if (tokenWithdrawalActivated) {
+      require(TokenVaultContract.transferTokens(addr, diff));
+    }
+    else {
+      withdrawable[addr] = diff;
+    }
+    releasedTokens[addr] = releasedTokens[addr].add(diff);
+    totalAvailableTokens = totalAvailableTokens.sub(diff);
 		return true;
 	}
 
