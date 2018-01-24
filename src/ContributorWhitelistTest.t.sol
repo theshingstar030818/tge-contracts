@@ -18,20 +18,17 @@ contract ContributorWhitelistTest is DSTest {
         whitelist = new ContributorWhitelist();
     }
 
-    function test_OnlyOwnerOrCrowdSaleContract() public {
+    function test_OnlyOwnerOrCrowdTGEContract() public {
       LendroidSupportToken LST = new LendroidSupportToken();
       Wallet ColdStorageWallet = new Wallet();
-      uint256 totalBonus = 6 * (10 ** 9);
-      uint256 initialBonusPercentage = 25 * (10 ** 16);
       uint256 saleStartTimestamp = now;
       uint256 saleEndTimestamp = now + 10 days;
-      PrivateSale sale = new PrivateSale(
+      TGE tge = new TGE();
+      tge.init(
         address(LST),
         24000,
         address(ColdStorageWallet),
         address(whitelist),
-        totalBonus,
-        initialBonusPercentage,
         saleStartTimestamp,
         saleEndTimestamp
       );
@@ -40,10 +37,10 @@ contract ContributorWhitelistTest is DSTest {
         whitelist.owner(),
         this
       );
-      // link PrivateSale to Whitelist
-      whitelist.setAuthority(address(sale));
+      // link PrivateTGE to Whitelist
+      whitelist.setAuthority(address(tge));
       assertTrue(
-        whitelist.authorized(address(sale))
+        whitelist.authorized(address(tge))
       );
     }
 
