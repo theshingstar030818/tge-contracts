@@ -21,13 +21,15 @@ contract LST_TGE is DSTest {
     LendroidSupportToken LST;
     ContributorWhitelist Whitelist;
     TGE tge;
+    Wallet wallet;
     TRS trs;
+    Vault vault;
     uint256 totalAvailableTokens;
     uint256 initialVestedReleasePercentage;
     uint256 saleStartTimestamp;
     uint256 saleEndTimestamp;
     uint256 precision = 10 ** 18;
-    uint256 LSTRatePerEther = 24000;
+    uint256 LSTRatePerEther = 48000;
 
     function setUp() public {
         // deploy TestUser
@@ -48,21 +50,27 @@ contract LST_TGE is DSTest {
           LST.balanceOf(address(ColdStorageWallet)),
           0
         );
-        // deploy TGE contract
+        // Initialize variables
         totalAvailableTokens = 6 * (10 ** 9);
         initialVestedReleasePercentage = 25 * (10 ** 16);
         saleStartTimestamp = now;
         saleEndTimestamp = now + 10 days;
+        // Deploy contracts
         tge = new TGE();
+        trs = new TRS();
+        // Link contracts
+        tge.setTRSContract(address(trs));
+        trs.setTGEContract(address(tge));
+        // Initialize contracts
         tge.init(
           address(LST),
-          24000,
+          LSTRatePerEther,
           address(ColdStorageWallet),
           address(Whitelist),
           saleStartTimestamp,
           saleEndTimestamp
         );
-        trs = new TRS();
+
         trs.init(
           totalAvailableTokens,
           initialVestedReleasePercentage
@@ -78,7 +86,7 @@ contract LST_TGE is DSTest {
     }
 
     function test_UserIsWhitelisted() public {
-      Whitelist.whitelistAddress(address(TestUser));
+      assertTrue(Whitelist.whitelistAddress(address(TestUser)));
       assertTrue(
         Whitelist.isWhitelisted(address(TestUser))
       );
@@ -91,12 +99,12 @@ contract LST_TGE is DSTest {
 
     function test_BuyTokensIfWhitelisted() public {
       // Whitelist TestUser address
-      Whitelist.whitelistAddress(address(TestUser));
+      assertTrue(Whitelist.whitelistAddress(address(TestUser)));
       assertEq(
         LST.balanceOf(address(TestUser)),
         0
       );
-      /* assertEq(
+      assertEq(
         tge.weiContributed(address(TestUser)),
         0
       );
@@ -108,8 +116,8 @@ contract LST_TGE is DSTest {
       assertEq(
         trs.totalAvailableTokens(),
         totalAvailableTokens * precision
-      ); */
-      /* // buy LST for 1 ether as TestUser
+      );
+      // buy LST for 1 ether as TestUser
       tge.buyTokens.value(1 ether)(address(TestUser));
       // Confirm 1 ether has been contributed by TestUser
       assertEq(
@@ -143,97 +151,103 @@ contract LST_TGE is DSTest {
       );
       // Confirm totalAvailableTokens has been reduced by the LST reserved
       assertEq(
-        trs.totalAvailableTokens(),
-        (totalAvailableTokens - LSTRatePerEther) * precision
-      ); */
+        trs.totalReservedTokensDuringTGE(),
+        LSTRatePerEther * precision
+      );
     }
 
-    /* function testFail_BuyTokensIfPaused() public {
+    function testFail_BuyTokensIfPaused() public {
       // Whitelist TestUser
       Whitelist.whitelistAddress(address(TestUser));
       // Pause Sale contract
-      Sale.pause();
+      tge.pause();
       // Buy LST as TestUser
-      Sale.buyTokens.value(1 ether)(address(TestUser));
+      tge.buyTokens.value(1 ether)(address(TestUser));
     }
 
     function testFail_BuyAboveIndividualCap() public {
       // Whitelist TestUser address
       Whitelist.whitelistAddress(address(TestUser));
       // buy LST for 101 ether as TestUser
-      Sale.buyTokens.value(5001 ether)(address(TestUser));
-    } */
+      tge.buyTokens.value(5001 ether)(address(TestUser));
+    }
 
-    /* function testFail_BuyAfterTotalCapHasReached() public {
+    function testFail_BuyAfterTotalCapHasReached() public {
       // Buy until total cap is reached
       for (uint contibutionCount = 1; contibutionCount < 6; contibutionCount++) {
         TestUser = new User();
         // Whitelist TestUser address
         Whitelist.whitelistAddress(address(TestUser));
         // buy LST for 101 ether as TestUser
-        Sale.buyTokens.value(5000 ether)(address(TestUser));
+        tge.buyTokens.value(5000 ether)(address(TestUser));
       }
       // Now the next buy should fail
       TestUser = new User();
       // Whitelist TestUser address
       Whitelist.whitelistAddress(address(TestUser));
       // buy LST for 101 ether as TestUser
-      Sale.buyTokens.value(5000 ether)(address(TestUser));
+      tge.buyTokens.value(5000 ether)(address(TestUser));
     }
 
     function test_BuyAfterChangingIndividualCap() public {
       // Whitelist TestUser address
       Whitelist.whitelistAddress(address(TestUser));
       // buy LST for 101 ether as TestUser
-      Sale.buyTokens.value(5000 ether)(address(TestUser));
-      Sale.setIndividualCap(9000 ether);
-      Sale.buyTokens.value(4000 ether)(address(TestUser));
-    } */
+      tge.buyTokens.value(5000 ether)(address(TestUser));
+      tge.setIndividualCap(9000 ether);
+      tge.buyTokens.value(4000 ether)(address(TestUser));
+    }
 
-    /* function testFail_BuyAfterChangingIndividualCap() public {
+    function testFail_BuyAfterChangingIndividualCap() public {
       // Whitelist TestUser address
       Whitelist.whitelistAddress(address(TestUser));
       // buy LST for 101 ether as TestUser
-      Sale.buyTokens.value(5000 ether)(address(TestUser));
-      Sale.setIndividualCap(9000 ether);
-      Sale.buyTokens.value(5000 ether)(address(TestUser));
-    } */
+      tge.buyTokens.value(5000 ether)(address(TestUser));
+      tge.setIndividualCap(9000 ether);
+      tge.buyTokens.value(5000 ether)(address(TestUser));
+    }
 
-    /* // Tests involving Vesting
+    // Tests involving Vesting
     function test_DecisionVesting() public {
       // Whitelist TestUser address
       Whitelist.whitelistAddress(address(TestUser));
       // buy LST for 1 ether as TestUser
-      Sale.buyTokens.value(1 ether)(address(TestUser));
+      tge.buyTokens.value(1 ether)(address(TestUser));
       // Confirm 1 ether has been contributed by TestUser
       // Confirm 24,000 LST has been reserved for TestUser
       assertEq(
-        Sale.reserved(address(TestUser)),
+        trs.reservedTokens(address(TestUser)),
         LSTRatePerEther * precision
       );
       assertEq(
-        Sale.totalReservedForVesting(),
+        trs.getTotalReservedForVesting(),
         0
       );
-      assert(!Sale.vesting(address(TestUser)));
-      assertEq(
-        Sale.expectedTokensWithBonus(address(TestUser)),
-        LSTRatePerEther * precision
-      );
       bool _vestingDecision = true;
-      assert(Sale.vestFor(address(TestUser), _vestingDecision));
+      assert(tge.vestFor(address(TestUser), _vestingDecision));
       assertEq(
-        Sale.totalReservedForVesting(),
+        trs.getTotalReservedForVesting(),
         LSTRatePerEther * precision
-      );
-      assert(Sale.vesting(address(TestUser)));
-      assertEq(
-        Sale.expectedTokensWithBonus(address(TestUser)),
-        totalAvailableTokens * precision
       );
     }
 
-    function test_ReservedWithBonus() public {
+    function testFail_VestWhenPaused() public {
+      // Whitelist TestUser address
+      Whitelist.whitelistAddress(address(TestUser));
+      // buy LST for 1 ether as TestUser
+      tge.buyTokens.value(1 ether)(address(TestUser));
+      // Confirm 1 ether has been contributed by TestUser
+      // Confirm 24,000 LST has been reserved for TestUser
+      assertEq(
+        trs.reservedTokens(address(TestUser)),
+        LSTRatePerEther * precision
+      );
+      // Pause Sale contract
+      tge.pause();
+      assert(tge.vestFor(address(TestUser), true));
+    }
+
+    function test_MultipleVestedContributors() public {
       User AnotherUser;
       uint256 totalContributions = 0;
       uint256 _amount;
@@ -244,36 +258,64 @@ contract LST_TGE is DSTest {
         // buy LST for 101 ether as TestUser
         _amount = (_i+5);
         totalContributions += _amount;
-        Sale.buyTokens.value(_amount * 1 ether)(address(AnotherUser));
-        assert(Sale.vestFor(address(AnotherUser), true));
+        tge.buyTokens.value(_amount * 1 ether)(address(AnotherUser));
+        assert(tge.vestFor(address(AnotherUser), true));
       }
 
       // Whitelist TestUser address
       Whitelist.whitelistAddress(address(TestUser));
       // buy LST for 1 ether as TestUser
-      Sale.buyTokens.value(2 ether)(address(TestUser));
-      assert(Sale.vestFor(address(TestUser), true));
-      uint256 totalVested = (totalContributions + 2) * LSTRatePerEther * precision;
+      tge.buyTokens.value(2 ether)(address(TestUser));
+      totalContributions += 2;
+      uint256 totalRemainingTokens = (totalAvailableTokens - totalContributions * LSTRatePerEther) * precision;
       assertEq(
-        Sale.totalReservedForVesting(),
+        trs.totalAvailableTokens() - trs.totalReservedTokensDuringTGE(),
+        totalRemainingTokens
+      );
+      assert(tge.vestFor(address(TestUser), true));
+      uint256 totalVested = (totalContributions) * LSTRatePerEther * precision;
+      assertEq(
+        trs.getTotalReservedForVesting(),
         totalVested
       );
       uint256 amountVested = 2 * LSTRatePerEther * precision;
       assertEq(
-        Sale.reserved(address(TestUser)),
+        trs.reservedTokens(address(TestUser)),
         amountVested
       );
-      uint256 totalRemainingBonus = (totalAvailableTokens * precision) - totalVested;
-      assertEq(
-        Sale.totalAvailableTokens(),
-        totalRemainingBonus
-      );
-      uint256 expectedBonus = ((amountVested * totalRemainingBonus) / totalVested);
-      assert(Sale.vesting(address(TestUser)));
+      /* uint256 expectedBonus = ((amountVested * totalRemainingBonus) / totalVested);
       assertEq(
         Sale.expectedTokensWithBonus(address(TestUser)),
         amountVested + expectedBonus
+      ); */
+    }
+
+    function test_MinimumBonus() public {
+      // Whitelist TestUser address
+      Whitelist.whitelistAddress(address(TestUser));
+      // buy LST for 1 ether as TestUser
+      tge.buyTokens.value(1 ether)(address(TestUser));
+      // Confirm 1 ether has been contributed by TestUser
+      // Confirm 24,000 LST has been reserved for TestUser
+      assertEq(
+        trs.reservedTokens(address(TestUser)),
+        LSTRatePerEther * precision
       );
-    } */
+      bool _vestingDecision = false;
+      assertEq(
+        trs.minimumBonusFor(address(TestUser), _vestingDecision),
+        0
+      );
+      _vestingDecision = true;
+      assert(tge.vestFor(address(TestUser), _vestingDecision));
+      assertEq(
+        trs.getTotalReservedForVesting(),
+        LSTRatePerEther * precision
+      );
+      assertEq(
+        trs.minimumBonusFor(address(TestUser), _vestingDecision),
+        125 * LSTRatePerEther * precision / 100
+      );
+    }
 
 }

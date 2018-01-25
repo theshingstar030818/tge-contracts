@@ -16,6 +16,7 @@ contract LendroidSupportToken is MintableToken, PausableToken {
    */
   function LendroidSupportToken() public {
     paused = true;
+    totalSupply = MAX_SUPPLY;
   }
 }
 
@@ -63,7 +64,7 @@ contract ContributorWhitelist is HasNoEther, Destructible {
  * the conact will assign them tokens based on a token per ETH rate.
  * Funds collected are forwarded to a coldStorageWallet as they arrive.
  */
-contract BaseTGEContract is Pausable {
+contract BaseTGEContract is Pausable, Destructible {
   using SafeMath for uint256;
 
   // start and end timestamps (both inclusive) when sale is open
@@ -77,7 +78,7 @@ contract BaseTGEContract is Pausable {
   ContributorWhitelist public whitelist;
 
   // address where funds are collected
-  address public wallet;
+  address public fundsWallet;
 
   // how many token units a buyer gets per ether
   uint256 public rate;
@@ -182,10 +183,10 @@ contract BaseTGEContract is Pausable {
     );
   }
 
-  // send ether to the fund collection wallet
+  // send ether to the fund collection fundsWallet
   // override to create custom fund forwarding mechanisms
   function forwardFunds() internal {
-    wallet.transfer(msg.value);
+    fundsWallet.transfer(msg.value);
   }
 
   // @return true if the transaction can buy tokens
@@ -260,27 +261,17 @@ contract BaseTGEContract is Pausable {
   function escapeHatchTransferRemainingBalance() whenPaused external onlyOwner {
     owner.transfer(this.balance);
   }
-
-  /**
-   * @dev Transfers the current balance to the owner and terminates the contract.
-   */
-  function destroy() onlyOwner public {
-    selfdestruct(owner);
-  }
-
-  function destroyAndSend(address _recipient) onlyOwner public {
-    selfdestruct(_recipient);
-  }
 }
 
 
 contract TGE is BaseTGEContract {
 
   // External contracts
-  TokenVault public TokenVaultContract;
   TRS public TRSContract;
+  Wallet public WalletContract;
 
   uint256 constant public precision = 10 ** 18;
+  uint256 public TRSOffset = 7 days;
   mapping (address => bool) private hasVested;
 
   modifier onlyTRS() {
@@ -288,33 +279,9 @@ contract TGE is BaseTGEContract {
     _;
   }
 
-  function init(
-    address _token,
-    uint256 _rate,
-    address _wallet,
-    address _whitelist,
-    uint256 _publicTGEStartTime, uint256 _publicTGEEndTime
-  ) onlyOwner external returns(bool) {
-    require(_publicTGEStartTime >= now);
-    require(_publicTGEEndTime >= _publicTGEStartTime);
-    require(_rate > 0);
-    require(_wallet != address(0));
-
-    token = LendroidSupportToken(_token);
-    whitelist = ContributorWhitelist(_whitelist);
-    rate = _rate;
-    wallet = _wallet;
-    publicTGEStartTime = _publicTGEStartTime;
-    publicTGEEndTime = _publicTGEEndTime;
-
-    totalCap = 25000 * precision;
-    individualCap = 5000 * precision;
-    return true;
-  }
-
-  function setTokenVaultContract(address _address) onlyOwner external returns(bool) {
-      TokenVaultContract = TokenVault(_address);
-      return true;
+  modifier onlyOwnerOrTRS() {
+    require((msg.sender == owner) || ((address(TRSContract) != 0) && (msg.sender == address(TRSContract))));
+    _;
   }
 
   function setTRSContract(address _address) onlyOwner external returns(bool) {
@@ -322,8 +289,43 @@ contract TGE is BaseTGEContract {
     return true;
   }
 
-  function saveContributionFor(address _beneficiary, uint256 _weiAmount, bool _isPrivateTGE) internal {
-    saveContribution(_beneficiary, _weiAmount, _isPrivateTGE);
+  modifier onlyWallet() {
+    require((address(WalletContract) != 0) && (msg.sender == address(WalletContract)));
+    _;
+  }
+
+  function setWalletContract(address _address) onlyOwner external returns(bool) {
+      WalletContract = Wallet(_address);
+      return true;
+  }
+
+  function setTRSOffset(uint256 _offset) onlyOwner external returns(bool) {
+      TRSOffset = _offset;
+      return true;
+  }
+
+  function init(
+    address _token,
+    uint256 _rate,
+    address _fundsWallet,
+    address _whitelist,
+    uint256 _publicTGEStartTime, uint256 _publicTGEEndTime
+  ) onlyOwner external returns(bool) {
+    require(_publicTGEStartTime >= now);
+    require(_publicTGEEndTime >= _publicTGEStartTime);
+    require(_rate > 0);
+    require(_fundsWallet != address(0));
+
+    token = LendroidSupportToken(_token);
+    whitelist = ContributorWhitelist(_whitelist);
+    rate = _rate;
+    fundsWallet = _fundsWallet;
+    publicTGEStartTime = _publicTGEStartTime;
+    publicTGEEndTime = _publicTGEEndTime;
+
+    totalCap = 25000 * precision;
+    individualCap = 5000 * precision;
+    return true;
   }
 
   // fallback function can be used to buy tokens
@@ -348,6 +350,8 @@ contract TGE is BaseTGEContract {
       weiRaised = weiRaised.add(weiAmount);
       require(weiRaised <= totalCap);
     }
+    /* weiRaised = weiRaised.add(weiAmount);
+    require(weiRaised <= totalCap); */
     // Save the contribution for future reference
     bool isPrivateTGE = now < publicTGEStartTime;
     saveContribution(_beneficiary, weiAmount, isPrivateTGE);
@@ -355,8 +359,30 @@ contract TGE is BaseTGEContract {
     // Mint LST into beneficiary account
     uint256 tokens = weiAmount.mul(rate);
     bool vestingDecision = hasVested[_beneficiary];
-    TRSContract.updateReservedTokens(_beneficiary, tokens, vestingDecision, false);
+    require(WalletContract.updateReservedTokens(_beneficiary, tokens, vestingDecision, false));
     forwardFunds();
+  }
+
+  function bulkReserveTokensForAddresses(address[] addrs, uint256[] tokenAmounts, bool[] _vestingDecisions) onlyOwner external returns(bool) {
+    require(addrs.length <= 100);
+    require((addrs.length == tokenAmounts.length) && (addrs.length == _vestingDecisions.length));
+    for (uint i=0; i<addrs.length; i++) {
+      require(WalletContract.updateReservedTokens(addrs[i], tokenAmounts[i], _vestingDecisions[i], false));
+      saveContribution(addrs[i], 0, true);
+    }
+    return true;
+  }
+
+  function bulkRemoveReservedTokensForAddresses(address[] addrs, uint256[] tokenAmounts) onlyOwner external returns(bool) {
+    require(addrs.length <= 100);
+    require(addrs.length == tokenAmounts.length);
+    bool vestingDecision;
+    for (uint i=0; i<addrs.length; i++) {
+      removeContribution(addrs[i], 0, true);
+      vestingDecision = hasVested[addrs[i]];
+      require(WalletContract.decrementReservedTokens(addrs[i], tokenAmounts[i], vestingDecision));
+    }
+    return true;
   }
 
   // Vesting logic
@@ -367,33 +393,237 @@ contract TGE is BaseTGEContract {
   // 4. Had chosen to vest previously, and chooses to vest now
   // 2 & 3 are valid cases
   // 1 and 4 are invalid because they are double-vesting actions
-  function vest(bool _decision) whenNotPaused external returns(bool) {
+  function vest(bool _decision) external returns(bool) {
+    return _vest(msg.sender, _decision);
+  }
+
+  function _vest(address _beneficiary, bool _decision) internal whenNotPaused returns(bool) {
     bool periodDuringPublicTGE = now <= publicTGEEndTime;
-    bool periodDuringTRSOffset = (now > publicTGEEndTime) && (now.sub(publicTGEEndTime) <= TRSContract.TRSOffset());
+    bool periodDuringTRSOffset = (now > publicTGEEndTime) && (now.sub(publicTGEEndTime) <= TRSOffset);
     require(periodDuringPublicTGE || periodDuringTRSOffset);
     // Prevent double vesting
-    bool doubleVesingDecision = hasVested[msg.sender] && _decision;
-    bool doubleNonVestingDecision = !hasVested[msg.sender] && !_decision;
+    bool doubleVesingDecision = hasVested[_beneficiary] && _decision;
+    bool doubleNonVestingDecision = !hasVested[_beneficiary] && !_decision;
     require(!doubleVesingDecision || !doubleNonVestingDecision);
     // Update totalReservedForVesting based on vesting decision
-    require(TRSContract.updateReservedTokens(msg.sender, 0, _decision, true));
-    hasVested[msg.sender] = _decision;
+    require(WalletContract.updateReservedTokens(_beneficiary, 0, _decision, true));
+    hasVested[_beneficiary] = _decision;
     return true;
   }
 
-  function bulkReserveTokensForAddresses(address[] addrs, uint256[] tokenAmounts, bool[] _vestingDecisions) onlyOwner external returns(bool) {
-    require(addrs.length <= 100);
-    require((addrs.length == tokenAmounts.length) && (addrs.length == _vestingDecisions.length));
-    bool _isPrivateTGE = now < publicTGEStartTime;
-    for (uint i=0; i<addrs.length; i++) {
-      TRSContract.updateReservedTokens(addrs[i], tokenAmounts[i], _vestingDecisions[i], false);
-      saveContributionFor(addrs[i], 0, _isPrivateTGE);
+  function vestFor(address _beneficiary, bool _decision) external onlyOwner returns(bool) {
+    return _vest(_beneficiary, _decision);
+  }
+
+  function isVestedContributor(address _beneficiary) external view onlyOwnerOrTRS returns(bool) {
+    return hasVested[_beneficiary];
+  }
+
+}
+
+
+contract Wallet is HasNoEther, Pausable, Destructible {
+
+  using SafeMath for uint256;
+  Vault public VaultContract;
+  TGE public TGEContract;
+  TRS public TRSContract;
+
+  mapping (address => bool) private hasWithdrawnBeforeTRS;
+
+  bool public tokenWithdrawalActivated = false;
+
+  // Total LSTs that would be reserved during the sale. Useful for calculating
+  // total bonus at end of sale
+  uint256 private totalReservedForVesting;
+  uint256 private totalWithdrawableBeforeTRS;
+  // Bonus counters
+  uint256 public totalAvailableTokens;
+  uint256 public totalReservedTokensDuringTGE;
+  uint256 public initialVestedReleasePercentage;
+  uint256 private bonusMultiplier;
+
+  // addresses for whom LSTs will be reserved following purchase
+  mapping (address => uint256) private reservedTokens;
+  mapping (address => uint256) private releasedTokens;
+
+  // withdrawable LST after end of sale
+  mapping (address => uint256) private withdrawable;
+
+  modifier onlyTGE() {
+    require((address(TGEContract) != 0) && (msg.sender == address(TGEContract)));
+    _;
+  }
+
+  modifier onlyTRS() {
+    require((address(TRSContract) != 0) && (msg.sender == address(TRSContract)));
+    _;
+  }
+
+  modifier onlyOwnerOrTRS() {
+    require((msg.sender == owner) || ((address(TRSContract) != 0) && (msg.sender == address(TRSContract))));
+    _;
+  }
+
+  function init(uint256 _totalLST, uint256 _initialBonusPercentage) onlyOwner external returns(bool) {
+    totalAvailableTokens = _totalLST * TGEContract.precision();
+    initialVestedReleasePercentage = _initialBonusPercentage;
+    return true;
+  }
+
+  function setVaultContract(address _address) onlyOwner external returns(bool) {
+      VaultContract = Vault(_address);
+      return true;
+  }
+
+  function setTGEContract(address _address) onlyOwner external returns(bool) {
+      TGEContract = TGE(_address);
+      return true;
+  }
+
+  function setTRSContract(address _address) onlyOwner external returns(bool) {
+      TRSContract = TRS(_address);
+      return true;
+  }
+
+  function setTokenWithdrawalActivation(bool _value) onlyOwner external returns(bool) {
+      tokenWithdrawalActivated = _value;
+      return true;
+  }
+
+  function setBonusMultiplier() onlyOwner external returns(bool) {
+      bonusMultiplier = totalAvailableTokens.mul(initialVestedReleasePercentage).div(totalReservedForVesting);
+      return true;
+  }
+
+  function setReservedTokenAmount(address _beneficiary, uint256 _value) onlyOwner external returns(bool) {
+      reservedTokens[_beneficiary] = _value;
+      return true;
+  }
+
+  function setReleasedTokenAmount(address _beneficiary, uint256 _value) onlyOwner external returns(bool) {
+      releasedTokens[_beneficiary] = _value;
+      return true;
+  }
+
+  function setwithdrawableTokenAmount(address _beneficiary, uint256 _value) onlyOwner external returns(bool) {
+      withdrawable[_beneficiary] = _value;
+      return true;
+  }
+
+  // _updateOnlyTotal is true only when called by TGE.vest()
+  function updateReservedTokens(address _beneficiary, uint256 _tokens, bool _vestingDecision, bool _updateOnlyTotal) external onlyTGE returns(bool) {
+    if (_updateOnlyTotal) {
+      if (_vestingDecision) {
+        totalReservedForVesting = totalReservedForVesting.add(reservedTokens[_beneficiary]);
+      }
+      else {
+        totalReservedForVesting = totalReservedForVesting.sub(reservedTokens[_beneficiary]);
+      }
+    }
+    else {
+      totalReservedTokensDuringTGE = totalReservedTokensDuringTGE.add(_tokens);
+      reservedTokens[_beneficiary] = reservedTokens[_beneficiary].add(_tokens);
+      if (_vestingDecision) {
+        totalReservedForVesting = totalReservedForVesting.add(_tokens);
+      }
     }
     return true;
   }
 
-  function isVestedContributor(address _beneficiary) external view onlyTRS returns(bool) {
-    return hasVested[_beneficiary];
+  function decrementReservedTokens(address _beneficiary, uint256 _tokens, bool _vestingDecision) external onlyTGE returns(bool) {
+    totalReservedTokensDuringTGE = totalReservedTokensDuringTGE.sub(_tokens);
+    reservedTokens[_beneficiary] = reservedTokens[_beneficiary].sub(_tokens);
+    if (_vestingDecision) {
+      totalReservedForVesting = totalReservedForVesting.sub(_tokens);
+    }
+    return true;
+  }
+
+  function _withdraw(address _beneficiary) internal returns(bool) {
+    uint256 publicTGEEndTime = TGEContract.publicTGEEndTime();
+    uint trsOffset = TGEContract.TRSOffset();
+    if (now > publicTGEEndTime && now.sub(publicTGEEndTime) > trsOffset) {
+      require(!hasWithdrawnBeforeTRS[_beneficiary]);
+      require(reservedTokens[_beneficiary] > 0);
+      hasWithdrawnBeforeTRS[_beneficiary] = true;
+      // Initialize withdrawableAmount to the reservedAmount
+      if (TGEContract.isVestedContributor(_beneficiary)) {
+        // Calculate vested proportion as a reservedAmount / totalReservedForVesting
+        assert(bonusMultiplier != 0);
+        uint256 reservedAmountWithBonus = reservedTokens[_beneficiary].mul(bonusMultiplier).div(TGEContract.precision());
+        // set withdrawableAmount to initialBonus
+        withdrawable[_beneficiary] = reservedAmountWithBonus;
+        // Reserve remaining tokens in TRS
+        reservedTokens[_beneficiary] = reservedAmountWithBonus.sub(withdrawable[_beneficiary]);
+      }
+      else {
+        withdrawable[_beneficiary] = reservedTokens[_beneficiary];
+        // Clear the reserve registry for unvested contributor
+        reservedTokens[_beneficiary] = 0;
+      }
+      totalWithdrawableBeforeTRS = totalWithdrawableBeforeTRS.add(withdrawable[_beneficiary]);
+    }
+    if (tokenWithdrawalActivated && withdrawable[_beneficiary] > 0) {
+      require(VaultContract.transferTokens(_beneficiary, withdrawable[_beneficiary]));
+      withdrawable[_beneficiary] = 0;
+    }
+    return true;
+  }
+
+  function withdraw() external whenNotPaused returns(bool) {
+    return _withdraw(msg.sender);
+  }
+
+  function withdrawFor(address _beneficiary) external onlyOwner returns(bool) {
+    return _withdraw(_beneficiary);
+  }
+
+  // BulkWithdraw
+  function bulkWithdraw(address[] addrs) onlyOwner external returns(bool) {
+    require(addrs.length <= 100);
+    for (uint i=0; i<addrs.length; i++) {
+      if (tokenWithdrawalActivated && withdrawable[addrs[i]] > 0) {
+        require(VaultContract.transferTokens(addrs[i], withdrawable[addrs[i]]));
+        withdrawable[addrs[i]] = 0;
+      }
+    }
+    return true;
+  }
+
+  function _stats(address _beneficiary) internal view returns(uint256, uint256, uint256) {
+      return (
+        reservedTokens[_beneficiary],
+        releasedTokens[_beneficiary],
+        withdrawable[_beneficiary]
+      );
+  }
+
+  function getStats(address _beneficiary) external onlyOwnerOrTRS view returns(uint256, uint256, uint256) {
+    return _stats(_beneficiary);
+  }
+
+  function myStats() external view returns(uint256, uint256, uint256) {
+    return _stats(msg.sender);
+  }
+
+  function updateStats(address _beneficiary, uint256 _releaseIncrement, uint256 _withdrawableAmount) external onlyTRS returns(bool) {
+    releasedTokens[_beneficiary] = releasedTokens[_beneficiary].add(_releaseIncrement);
+    withdrawable[_beneficiary] = _withdrawableAmount;
+    totalAvailableTokens = totalAvailableTokens.sub(_releaseIncrement);
+    return true;
+  }
+
+  function getTotalReservedForVesting() external onlyOwner view returns(uint256) {
+    return totalReservedForVesting;
+  }
+
+  function getBonusMultiplier() onlyOwner external view returns(uint256) {
+      return bonusMultiplier;
+  }
+
+  function hasContributorWithdrawnBeforeTRS(address _beneficiary) onlyOwner external view returns(bool) {
+    return hasWithdrawnBeforeTRS[_beneficiary];
   }
 
 }
@@ -405,9 +635,8 @@ contract TRS is HasNoEther, Pausable, Destructible {
 
   // External contracts
   TGE public TGEContract;
-  TokenVault public TokenVaultContract;
-
-  mapping (address => bool) private hasWithdrawnBeforeTRS;
+  Wallet public WalletContract;
+  Vault public VaultContract;
 
   // TRS Schedule counters
   uint256 public totalReleaseCycles;
@@ -417,27 +646,13 @@ contract TRS is HasNoEther, Pausable, Destructible {
   uint256 public scheduleStartTime = 0;
   uint256 public cyclicalVestedReleasePercentage;
 
-  uint256 public TRSOffset = 7 days;
-  bool public tokenWithdrawalActivated = false;
-
-  // Total LSTs that would be reserved during the sale. Useful for calculating
-  // total bonus at end of sale
-  uint256 private totalReservedForVesting;
-  uint256 private totalWithdrawableBeforeTRS;
-  // Bonus counters
-  uint256 public totalAvailableTokens;
-  uint256 public initialVestedReleasePercentage;
-  uint256 private bonusMultiplier;
-
-  // addresses for whom LSTs will be reserved following purchase
-  mapping (address => uint256) public reservedTokens;
-  mapping (address => uint256) public releasedTokens;
-
-  // withdrawable LST after end of sale
-  mapping (address => uint256) private withdrawable;
-
   modifier onlyTGE() {
     require((address(TGEContract) != 0) && (msg.sender == address(TGEContract)));
+    _;
+  }
+
+  modifier onlyWallet() {
+    require((address(WalletContract) != 0) && (msg.sender == address(WalletContract)));
     _;
   }
 
@@ -472,95 +687,19 @@ contract TRS is HasNoEther, Pausable, Destructible {
    */
   modifier scheduleConfigurationCompleted() { require(scheduleConfigured); _; }
 
-  function init(uint256 _totalLST, uint256 _initialBonusPercentage) onlyOwner external returns(bool) {
-    totalAvailableTokens = _totalLST * TGEContract.precision();
-    initialVestedReleasePercentage = _initialBonusPercentage;
-    return true;
-  }
-
   function setTGEContract(address _address) onlyOwner external returns(bool) {
       TGEContract = TGE(_address);
       return true;
   }
 
-  function setTokenVaultContract(address _address) onlyOwner external returns(bool) {
-      TokenVaultContract = TokenVault(_address);
+  function setVaultContract(address _address) onlyOwner external returns(bool) {
+      VaultContract = Vault(_address);
       return true;
   }
 
-  function setTokenWithdrawalActivation(bool _value) onlyOwner external returns(bool) {
-      tokenWithdrawalActivated = _value;
+  function setWalletContract(address _address) onlyOwner external returns(bool) {
+      WalletContract = Wallet(_address);
       return true;
-  }
-
-  function setTRSOffset(uint256 _offset) onlyOwner external returns(bool) {
-      TRSOffset = _offset;
-      return true;
-  }
-
-  function setBonusMultiplier() onlyOwner external returns(bool) {
-      bonusMultiplier = totalAvailableTokens.mul(initialVestedReleasePercentage).div(totalReservedForVesting);
-      return true;
-  }
-
-  // _updateOnlyTotal is true only when called by TGE.vest()
-  function updateReservedTokens(address _beneficiary, uint256 _tokens, bool _vestingDecision, bool _updateOnlyTotal) external onlyTGE returns(bool) {
-    if (_updateOnlyTotal) {
-      if (_vestingDecision) {
-        totalReservedForVesting = totalReservedForVesting.add(reservedTokens[_beneficiary]);
-      }
-      else {
-        totalReservedForVesting = totalReservedForVesting.sub(reservedTokens[_beneficiary]);
-      }
-    }
-    else {
-      reservedTokens[_beneficiary] = reservedTokens[_beneficiary].add(_tokens);
-      if (_vestingDecision) {
-        totalReservedForVesting = totalReservedForVesting.add(_tokens);
-      }
-    }
-  }
-
-  function withdraw() external whenNotPaused returns(bool) {
-    uint256 publicTGEEndTime = TGEContract.publicTGEEndTime();
-    if (now > publicTGEEndTime && now.sub(publicTGEEndTime) > TRSOffset) {
-      require(!hasWithdrawnBeforeTRS[msg.sender]);
-      require(reservedTokens[msg.sender] > 0);
-      hasWithdrawnBeforeTRS[msg.sender] = true;
-      // Initialize withdrawableAmount to the reservedAmount
-      if (TGEContract.isVestedContributor(msg.sender)) {
-        // Calculate vested proportion as a reservedAmount / totalReservedForVesting
-        assert(bonusMultiplier != 0);
-        uint256 reservedAmountWithBonus = reservedTokens[msg.sender].mul(bonusMultiplier).div(TGEContract.precision());
-        // set withdrawableAmount to initialBonus
-        withdrawable[msg.sender] = reservedAmountWithBonus;
-        // Reserve remaining tokens in TRS
-        reservedTokens[msg.sender] = reservedAmountWithBonus.sub(withdrawable[msg.sender]);
-      }
-      else {
-        withdrawable[msg.sender] = reservedTokens[msg.sender];
-        // Clear the reserve registry for unvested contributor
-        reservedTokens[msg.sender] = 0;
-      }
-      totalWithdrawableBeforeTRS = totalWithdrawableBeforeTRS.add(withdrawable[msg.sender]);
-    }
-    if (tokenWithdrawalActivated && withdrawable[msg.sender] > 0) {
-      require(TokenVaultContract.transferTokens(msg.sender, withdrawable[msg.sender]));
-      withdrawable[msg.sender] = 0;
-    }
-    return true;
-  }
-
-  // BulkWithdraw
-  function bulkWithdraw(address[] addrs) onlyOwner external returns(bool) {
-    require(addrs.length <= 100);
-    for (uint i=0; i<addrs.length; i++) {
-      if (tokenWithdrawalActivated && withdrawable[addrs[i]] > 0) {
-        require(TokenVaultContract.transferTokens(addrs[i], withdrawable[addrs[i]]));
-        withdrawable[addrs[i]] = 0;
-      }
-    }
-    return true;
   }
 
   // Release logic
@@ -601,7 +740,7 @@ contract TRS is HasNoEther, Pausable, Destructible {
 	 * and multiMint has been called.
 	 */
 	function startSchedule() onlyOwner scheduleConfigurationCompleted preScheduleStart external returns(bool) {
-    totalAvailableTokens = totalAvailableTokens.sub(totalWithdrawableBeforeTRS);
+    /* totalAvailableTokens = totalAvailableTokens.sub(totalWithdrawableBeforeTRS); */
     scheduleStartTime = now;
     return true;
 	}
@@ -721,9 +860,10 @@ contract TRS is HasNoEther, Pausable, Destructible {
 	 * the correct model.
 	 */
 	function releaseTo(address addr) postScheduleStart whenNotPaused public returns (bool) {
-		uint256 _reservedAmount = reservedTokens[addr];
-    uint256 _releasedAmount = releasedTokens[addr];
-
+		uint256 _reservedAmount;
+    uint256 _releasedAmount;
+    uint256 _withdrawableAmount;
+    (_reservedAmount, _releasedAmount, _withdrawableAmount) = WalletContract.getStats(addr);
 		uint256 diff = _releaseTo(_reservedAmount, _releasedAmount, now);
 
 		// release could not be made
@@ -735,19 +875,18 @@ contract TRS is HasNoEther, Pausable, Destructible {
 		require((diff + _releasedAmount) <= _reservedAmount);
 
 		// transfer and increment
-    if (tokenWithdrawalActivated) {
-      require(TokenVaultContract.transferTokens(addr, diff));
+    if (WalletContract.tokenWithdrawalActivated()) {
+      require(VaultContract.transferTokens(addr, diff));
     }
     else {
-      withdrawable[addr] = diff;
+      _withdrawableAmount = diff;
     }
-    releasedTokens[addr] = releasedTokens[addr].add(diff);
-    totalAvailableTokens = totalAvailableTokens.sub(diff);
+    require(WalletContract.updateStats(addr, diff, _withdrawableAmount));
 		return true;
 	}
 
 	// force withdrawal to many addresses
-	function bulkRelease(address[] addrs) external whenNotPaused returns(bool) {
+	function bulkRelease(address[] addrs) external onlyOwner whenNotPaused returns(bool) {
 		for (uint i=0; i<addrs.length; i++) {
       releaseTo(addrs[i]);
     }
@@ -757,33 +896,40 @@ contract TRS is HasNoEther, Pausable, Destructible {
 }
 
 
-contract TokenVault is HasNoEther, Pausable, Destructible {
+contract Vault is HasNoEther, Pausable, Destructible {
 
   using SafeMath for uint256;
 
+  Wallet public WalletContract;
   LendroidSupportToken public token;
 
-  mapping (address => bool) public authorized;
-
-  modifier auth() {
-    require((msg.sender == owner) || (authorized[msg.sender]));
+  modifier onlyWallet() {
+    require((address(WalletContract) != 0) && (msg.sender == address(WalletContract)));
     _;
   }
 
-  function setAuthority(address _address) external onlyOwner returns(bool) {
-    authorized[_address] = true;
-    return true;
+  function setWalletContract(address _address) onlyOwner external returns(bool) {
+      WalletContract = Wallet(_address);
+      return true;
   }
 
-  function removeAuthority(address _address) external onlyOwner returns(bool) {
-    authorized[_address] = false;
-    return true;
+  function setToken(address _address) onlyOwner external returns(bool) {
+      token = LendroidSupportToken(_address);
+      return true;
   }
 
   // transfer tokens
-  function transferTokens(address _beneficiary, uint256 tokens) external auth whenNotPaused returns(bool) {
+  function _transferTokens(address _beneficiary, uint256 tokens) internal returns(bool) {
   	require(token.transfer(_beneficiary, tokens));
   	return true;
+  }
+
+  function transferTokens(address _beneficiary, uint256 tokens) external onlyWallet whenNotPaused returns(bool) {
+  	_transferTokens(_beneficiary, tokens);
+  }
+
+  function transferTokensTo(address _beneficiary, uint256 tokens) external onlyOwner returns(bool) {
+  	_transferTokens(_beneficiary, tokens);
   }
 
 }
