@@ -25,7 +25,6 @@ contract ContributorWhitelist is HasNoEther, Destructible {
 
   TGE public TGEContract;
 
-  mapping (address => bool) public authorized;
   mapping (address => bool) public whitelist;
 
   modifier onlyOwnerOrTGE() {
@@ -540,7 +539,7 @@ contract Wallet is HasNoEther, Pausable, Destructible {
   function _withdraw(address _beneficiary) internal returns(bool) {
     uint256 publicTGEEndBlockTimeStamp = TGEContract.publicTGEEndBlockTimeStamp();
     uint trsOffset = TGEContract.TRSOffset();
-    if (block.timestamp > publicTGEEndBlockTimeStamp && block.timestamp.sub(publicTGEEndBlockTimeStamp) > trsOffset) {
+    if (block.timestamp > publicTGEEndBlockTimeStamp && block.timestamp.sub(publicTGEEndBlockTimeStamp) < trsOffset) {
       require(!hasWithdrawnBeforeTRS[_beneficiary]);
       hasWithdrawnBeforeTRS[_beneficiary] = true;
       // Initialize withdrawableAmount to the reservedAmount

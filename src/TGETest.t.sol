@@ -84,7 +84,7 @@ contract LST_TGE is DSTest {
           initialVestedReleasePercentage
         );
         // link TGE to Whitelist
-        Whitelist.setAuthority(address(tge));
+        Whitelist.setTGEContract(address(tge));
     }
 
     function testFail_UserNotWhitelisted() public {

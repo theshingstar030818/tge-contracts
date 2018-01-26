@@ -38,9 +38,10 @@ contract ContributorWhitelistTest is DSTest {
         this
       );
       // link PrivateTGE to Whitelist
-      whitelist.setAuthority(address(tge));
-      assertTrue(
-        whitelist.authorized(address(tge))
+      whitelist.setTGEContract(address(tge));
+      assertEq(
+        whitelist.TGEContract(),
+        address(tge)
       );
     }
 
