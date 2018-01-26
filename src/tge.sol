@@ -50,6 +50,14 @@ contract ContributorWhitelist is HasNoEther, Destructible {
     return true;
   }
 
+  function bulkWhitelistAddresses(address[] addrs) public onlyOwner returns(bool) {
+    require(addrs.length <= 100);
+    for (uint i=0; i<addrs.length; i++) {
+      whitelist[addrs[i]] = true;
+    }
+    return true;
+  }
+
   function isWhitelisted(address _address) public auth view returns(bool) {
     return whitelist[_address];
   }
@@ -68,8 +76,8 @@ contract BaseTGEContract is Pausable, Destructible {
   using SafeMath for uint256;
 
   // start and end timestamps (both inclusive) when sale is open
-  uint256 public publicTGEStartTime;
-  uint256 public publicTGEEndTime;
+  uint256 public publicTGEStartBlockTimeStamp;
+  uint256 public publicTGEEndBlockTimeStamp;
 
   // The token being sold
   LendroidSupportToken public token;
@@ -111,7 +119,7 @@ contract BaseTGEContract is Pausable, Destructible {
   mapping (address => uint256) public weiContributed;
 
   modifier whilePublicTGEIsActive() {
-    require(now <= publicTGEEndTime);
+    require(block.timestamp <= publicTGEEndBlockTimeStamp);
     _;
   }
 
@@ -156,14 +164,14 @@ contract BaseTGEContract is Pausable, Destructible {
    * @return True if the operation was successful.
    */
   function endPublicTGE() onlyOwner external returns (bool) {
-    publicTGEEndTime = now;
+    publicTGEEndBlockTimeStamp = block.timestamp;
     return true;
   }
 
   function saveContribution(address beneficiary, uint256 weiAmount, bool _isPrivateTGE) internal {
     // save contribution
     contributions[beneficiary].push(Contribution({
-        timestamp: now,
+        timestamp: block.timestamp,
         WEIContributed: weiAmount,
         LST_WEI_rate: rate,
         isPrivateTGE: _isPrivateTGE
@@ -175,7 +183,7 @@ contract BaseTGEContract is Pausable, Destructible {
     // save contribution
     contributionsRemoved[beneficiary].push(
       ContributionRemoved({
-        timestamp: now,
+        timestamp: block.timestamp,
         WEIRemoved: weiAmount,
         LST_WEI_rate: rate,
         isPrivateTGE: _isPrivateTGE
@@ -191,14 +199,14 @@ contract BaseTGEContract is Pausable, Destructible {
 
   // @return true if the transaction can buy tokens
   function validPurchase() internal view returns (bool) {
-    bool withinPeriod = now >= publicTGEStartTime && now <= publicTGEEndTime;
+    bool withinPeriod = block.timestamp >= publicTGEStartBlockTimeStamp && block.timestamp <= publicTGEEndBlockTimeStamp;
     bool nonZeroPurchase = msg.value != 0;
     return withinPeriod && nonZeroPurchase;
   }
 
   // @return true if crowdsale event has ended
   function hasEnded() external view returns (bool) {
-    return now > publicTGEEndTime;
+    return block.timestamp > publicTGEEndBlockTimeStamp;
   }
 
   // Total contributions made by contributor
@@ -267,30 +275,19 @@ contract BaseTGEContract is Pausable, Destructible {
 contract TGE is BaseTGEContract {
 
   // External contracts
-  TRS public TRSContract;
   Wallet public WalletContract;
 
   uint256 constant public precision = 10 ** 18;
   uint256 public TRSOffset = 7 days;
   mapping (address => bool) private hasVested;
 
-  modifier onlyTRS() {
-    require((address(TRSContract) != 0) && (msg.sender == address(TRSContract)));
-    _;
-  }
-
-  modifier onlyOwnerOrTRS() {
-    require((msg.sender == owner) || ((address(TRSContract) != 0) && (msg.sender == address(TRSContract))));
-    _;
-  }
-
-  function setTRSContract(address _address) onlyOwner external returns(bool) {
-    TRSContract = TRS(_address);
-    return true;
-  }
-
   modifier onlyWallet() {
     require((address(WalletContract) != 0) && (msg.sender == address(WalletContract)));
+    _;
+  }
+
+  modifier onlyOwnerOrWallet() {
+    require((msg.sender == owner) || ((address(WalletContract) != 0) && (msg.sender == address(WalletContract))));
     _;
   }
 
@@ -309,10 +306,10 @@ contract TGE is BaseTGEContract {
     uint256 _rate,
     address _fundsWallet,
     address _whitelist,
-    uint256 _publicTGEStartTime, uint256 _publicTGEEndTime
+    uint256 _publicTGEStartBlockTimeStamp, uint256 _publicTGEEndBlockTimeStamp
   ) onlyOwner external returns(bool) {
-    require(_publicTGEStartTime >= now);
-    require(_publicTGEEndTime >= _publicTGEStartTime);
+    require(_publicTGEStartBlockTimeStamp >= block.timestamp);
+    require(_publicTGEEndBlockTimeStamp >= _publicTGEStartBlockTimeStamp);
     require(_rate > 0);
     require(_fundsWallet != address(0));
 
@@ -320,8 +317,8 @@ contract TGE is BaseTGEContract {
     whitelist = ContributorWhitelist(_whitelist);
     rate = _rate;
     fundsWallet = _fundsWallet;
-    publicTGEStartTime = _publicTGEStartTime;
-    publicTGEEndTime = _publicTGEEndTime;
+    publicTGEStartBlockTimeStamp = _publicTGEStartBlockTimeStamp;
+    publicTGEEndBlockTimeStamp = _publicTGEEndBlockTimeStamp;
 
     totalCap = 25000 * precision;
     individualCap = 5000 * precision;
@@ -340,20 +337,20 @@ contract TGE is BaseTGEContract {
 
   function _reserveTokens(address _beneficiary, uint256 weiAmount) whilePublicTGEIsActive whenNotPaused internal {
     require(_beneficiary != address(0));
-    require((now < publicTGEStartTime) || (now >= publicTGEStartTime && validPurchase()));
+    require((block.timestamp < publicTGEStartBlockTimeStamp) || (block.timestamp >= publicTGEStartBlockTimeStamp && validPurchase()));
     // Validate contributor has been whitelisted
     require(whitelist.isWhitelisted(_beneficiary));
     // update state
     weiContributed[_beneficiary] = weiContributed[_beneficiary].add(weiAmount);
     require(weiContributed[_beneficiary] <= individualCap);
-    if (now >= publicTGEStartTime) {
+    if (block.timestamp >= publicTGEStartBlockTimeStamp) {
       weiRaised = weiRaised.add(weiAmount);
       require(weiRaised <= totalCap);
     }
     /* weiRaised = weiRaised.add(weiAmount);
     require(weiRaised <= totalCap); */
     // Save the contribution for future reference
-    bool isPrivateTGE = now < publicTGEStartTime;
+    bool isPrivateTGE = block.timestamp < publicTGEStartBlockTimeStamp;
     saveContribution(_beneficiary, weiAmount, isPrivateTGE);
     // calculate token amount to be created
     // Mint LST into beneficiary account
@@ -393,13 +390,13 @@ contract TGE is BaseTGEContract {
   // 4. Had chosen to vest previously, and chooses to vest now
   // 2 & 3 are valid cases
   // 1 and 4 are invalid because they are double-vesting actions
-  function vest(bool _decision) external returns(bool) {
+  function vest(bool _decision) external whenNotPaused returns(bool) {
     return _vest(msg.sender, _decision);
   }
 
-  function _vest(address _beneficiary, bool _decision) internal whenNotPaused returns(bool) {
-    bool periodDuringPublicTGE = now <= publicTGEEndTime;
-    bool periodDuringTRSOffset = (now > publicTGEEndTime) && (now.sub(publicTGEEndTime) <= TRSOffset);
+  function _vest(address _beneficiary, bool _decision) internal returns(bool) {
+    bool periodDuringPublicTGE = block.timestamp <= publicTGEEndBlockTimeStamp;
+    bool periodDuringTRSOffset = (block.timestamp > publicTGEEndBlockTimeStamp) && (block.timestamp.sub(publicTGEEndBlockTimeStamp) <= TRSOffset);
     require(periodDuringPublicTGE || periodDuringTRSOffset);
     // Prevent double vesting
     bool doubleVesingDecision = hasVested[_beneficiary] && _decision;
@@ -411,11 +408,11 @@ contract TGE is BaseTGEContract {
     return true;
   }
 
-  function vestFor(address _beneficiary, bool _decision) external onlyOwner returns(bool) {
+  function vestFor(address _beneficiary, bool _decision) external onlyOwner whenNotPaused returns(bool) {
     return _vest(_beneficiary, _decision);
   }
 
-  function isVestedContributor(address _beneficiary) external view onlyOwnerOrTRS returns(bool) {
+  function isVestedContributor(address _beneficiary) external view onlyOwnerOrWallet returns(bool) {
     return hasVested[_beneficiary];
   }
 
@@ -428,6 +425,8 @@ contract Wallet is HasNoEther, Pausable, Destructible {
   Vault public VaultContract;
   TGE public TGEContract;
   TRS public TRSContract;
+
+  uint256 constant public precision = 10 ** 18;
 
   mapping (address => bool) private hasWithdrawnBeforeTRS;
 
@@ -466,7 +465,7 @@ contract Wallet is HasNoEther, Pausable, Destructible {
   }
 
   function init(uint256 _totalLST, uint256 _initialBonusPercentage) onlyOwner external returns(bool) {
-    totalAvailableTokens = _totalLST * TGEContract.precision();
+    totalAvailableTokens = _totalLST * precision;
     initialVestedReleasePercentage = _initialBonusPercentage;
     return true;
   }
@@ -492,7 +491,7 @@ contract Wallet is HasNoEther, Pausable, Destructible {
   }
 
   function setBonusMultiplier() onlyOwner external returns(bool) {
-      bonusMultiplier = totalAvailableTokens.mul(initialVestedReleasePercentage).div(totalReservedForVesting);
+      bonusMultiplier = totalAvailableTokens.mul(precision).div(totalReservedForVesting);
       return true;
   }
 
@@ -541,21 +540,20 @@ contract Wallet is HasNoEther, Pausable, Destructible {
   }
 
   function _withdraw(address _beneficiary) internal returns(bool) {
-    uint256 publicTGEEndTime = TGEContract.publicTGEEndTime();
+    uint256 publicTGEEndBlockTimeStamp = TGEContract.publicTGEEndBlockTimeStamp();
     uint trsOffset = TGEContract.TRSOffset();
-    if (now > publicTGEEndTime && now.sub(publicTGEEndTime) > trsOffset) {
+    if (block.timestamp > publicTGEEndBlockTimeStamp && block.timestamp.sub(publicTGEEndBlockTimeStamp) > trsOffset) {
       require(!hasWithdrawnBeforeTRS[_beneficiary]);
-      require(reservedTokens[_beneficiary] > 0);
       hasWithdrawnBeforeTRS[_beneficiary] = true;
       // Initialize withdrawableAmount to the reservedAmount
       if (TGEContract.isVestedContributor(_beneficiary)) {
         // Calculate vested proportion as a reservedAmount / totalReservedForVesting
         assert(bonusMultiplier != 0);
-        uint256 reservedAmountWithBonus = reservedTokens[_beneficiary].mul(bonusMultiplier).div(TGEContract.precision());
+        uint256 _reservedAmountWithBonus = reservedTokens[_beneficiary].mul(bonusMultiplier).div(precision);
         // set withdrawableAmount to initialBonus
-        withdrawable[_beneficiary] = reservedAmountWithBonus;
+        withdrawable[_beneficiary] = _reservedAmountWithBonus.mul(initialVestedReleasePercentage).div(precision);
         // Reserve remaining tokens in TRS
-        reservedTokens[_beneficiary] = reservedAmountWithBonus.sub(withdrawable[_beneficiary]);
+        reservedTokens[_beneficiary] = _reservedAmountWithBonus.sub(withdrawable[_beneficiary]);
       }
       else {
         withdrawable[_beneficiary] = reservedTokens[_beneficiary];
@@ -634,29 +632,25 @@ contract TRS is HasNoEther, Pausable, Destructible {
   using SafeMath for uint256;
 
   // External contracts
-  TGE public TGEContract;
   Wallet public WalletContract;
   Vault public VaultContract;
+
+  uint256 constant public precision = 10 ** 18;
 
   // TRS Schedule counters
   uint256 public totalReleaseCycles;
   uint constant public scheduleInterval = 30 days;
   bool public scheduleConfigured;
   bool public scheduleLocked;
-  uint256 public scheduleStartTime = 0;
+  uint256 public scheduleStartBlockTimeStamp = 0;
   uint256 public cyclicalVestedReleasePercentage;
-
-  modifier onlyTGE() {
-    require((address(TGEContract) != 0) && (msg.sender == address(TGEContract)));
-    _;
-  }
 
   modifier onlyWallet() {
     require((address(WalletContract) != 0) && (msg.sender == address(WalletContract)));
     _;
   }
 
-  modifier preScheduleLock() { require(!scheduleLocked && scheduleStartTime == 0); _; }
+  modifier preScheduleLock() { require(!scheduleLocked && scheduleStartBlockTimeStamp == 0); _; }
 
   /**
    * Lock called, deposits no longer available.
@@ -666,13 +660,13 @@ contract TRS is HasNoEther, Pausable, Destructible {
   /**
     * Prestart, state is after lock, before start
     */
-  modifier preScheduleStart() { require(scheduleLocked && scheduleStartTime == 0); _; }
+  modifier preScheduleStart() { require(scheduleLocked && scheduleStartBlockTimeStamp == 0); _; }
 
   /**
-   * Start called, the TRS contract is now finalized, and withdrawals
-   * are now permitted.
+   * Start called, the TRS contract is block.timestamp finalized, and withdrawals
+   * are block.timestamp permitted.
    */
-  modifier postScheduleStart() { require(scheduleLocked && scheduleStartTime != 0); _; }
+  modifier postScheduleStart() { require(scheduleLocked && scheduleStartBlockTimeStamp != 0); _; }
 
   /**
    * Uninitialized state, before init is called. Mainly used as a guard to
@@ -686,11 +680,6 @@ contract TRS is HasNoEther, Pausable, Destructible {
    * the withdrawal process.
    */
   modifier scheduleConfigurationCompleted() { require(scheduleConfigured); _; }
-
-  function setTGEContract(address _address) onlyOwner external returns(bool) {
-      TGEContract = TGE(_address);
-      return true;
-  }
 
   function setVaultContract(address _address) onlyOwner external returns(bool) {
       VaultContract = Vault(_address);
@@ -741,7 +730,7 @@ contract TRS is HasNoEther, Pausable, Destructible {
 	 */
 	function startSchedule() onlyOwner scheduleConfigurationCompleted preScheduleStart external returns(bool) {
     /* totalAvailableTokens = totalAvailableTokens.sub(totalWithdrawableBeforeTRS); */
-    scheduleStartTime = now;
+    scheduleStartBlockTimeStamp = block.timestamp;
     return true;
 	}
 
@@ -750,7 +739,7 @@ contract TRS is HasNoEther, Pausable, Destructible {
 	 * the TRS contract is "live", withdrawal enabled, started.
 	 */
 	function hasScheduleStarted() external view whenNotPaused returns(bool) {
-		return scheduleLocked && scheduleStartTime != 0;
+		return scheduleLocked && scheduleStartBlockTimeStamp != 0;
 	}
 
   /**
@@ -772,14 +761,14 @@ contract TRS is HasNoEther, Pausable, Destructible {
 		 * Lower bound, consider period 0 to be the time between
 		 * start() and startBlockTimestamp
 		 */
-		if (scheduleStartTime > _timestamp)
+		if (scheduleStartBlockTimeStamp > _timestamp)
 			return 0;
 
 		/**
 		 * Calculate the appropriate period, and set an upper bound of
 		 * periods - 1.
 		 */
-		uint256 c = ((_timestamp - scheduleStartTime) / scheduleInterval) + 1;
+		uint256 c = ((_timestamp - scheduleStartBlockTimeStamp) / scheduleInterval) + 1;
 		if (c > totalReleaseCycles)
 			c = totalReleaseCycles;
 		return c;
@@ -788,7 +777,7 @@ contract TRS is HasNoEther, Pausable, Destructible {
 	// what withdrawal period are we in?
 	// returns the cycle number from [0, totalReleaseCycles)
 	function currentCycle() public view returns(uint256) {
-		return cycleAt(now);
+		return cycleAt(block.timestamp);
 	}
 
   // release releases tokens to the sender
@@ -808,7 +797,7 @@ contract TRS is HasNoEther, Pausable, Destructible {
 		 * Calculate the total withdrawableAmount, giving a numerator with range:
 		 * [0.25 * 10 ** 18, 1 * 10 ** 18]
 		 */
-		return (cycleAt(_timestamp) * TGEContract.precision()) / (totalReleaseCycles);
+		return (cycleAt(_timestamp) * precision) / (totalReleaseCycles);
 	}
 
 	/**
@@ -846,7 +835,7 @@ contract TRS is HasNoEther, Pausable, Destructible {
 		 *
 		 * The maximum for a uint256 is = 1.15 * (10 ** 77)
 		 */
-		uint256 withdrawableAmount = _reservedAmount.mul(fraction).div(TGEContract.precision());
+		uint256 withdrawableAmount = _reservedAmount.mul(fraction).div(precision);
 
 		// check that we can withdraw something
 		if (withdrawableAmount > _withdrawnAmount) {
@@ -864,7 +853,7 @@ contract TRS is HasNoEther, Pausable, Destructible {
     uint256 _releasedAmount;
     uint256 _withdrawableAmount;
     (_reservedAmount, _releasedAmount, _withdrawableAmount) = WalletContract.getStats(addr);
-		uint256 diff = _releaseTo(_reservedAmount, _releasedAmount, now);
+		uint256 diff = _releaseTo(_reservedAmount, _releasedAmount, block.timestamp);
 
 		// release could not be made
 		if (diff == 0) {

@@ -7,17 +7,17 @@ import "./tge.sol";
 
 contract User {}
 
-contract Wallet {
-  // Wallet contract to accept payment
-  function() payable public {}
-}
+  contract ColdWallet {
+    // Wallet contract to accept payment
+    function() payable public {}
+  }
 
 
 contract LST_TGE is DSTest {
 
     /*contracts*/
     User TestUser;
-    Wallet ColdStorageWallet;
+    ColdWallet ColdStorageWallet;
     LendroidSupportToken LST;
     ContributorWhitelist Whitelist;
     TGE tge;
@@ -35,7 +35,7 @@ contract LST_TGE is DSTest {
         // deploy TestUser
         TestUser = new User();
         // deploy ColdStorageWallet
-        ColdStorageWallet = new Wallet();
+        ColdStorageWallet = new ColdWallet();
         // deploy whitelist
         Whitelist = new ContributorWhitelist();
         // deploy LST
@@ -57,10 +57,18 @@ contract LST_TGE is DSTest {
         saleEndTimestamp = now + 10 days;
         // Deploy contracts
         tge = new TGE();
+        wallet = new Wallet();
         trs = new TRS();
+        vault = new Vault();
         // Link contracts
-        tge.setTRSContract(address(trs));
-        trs.setTGEContract(address(tge));
+        tge.setWalletContract(address(wallet));
+        wallet.setTGEContract(address(tge));
+        wallet.setTRSContract(address(trs));
+        wallet.setVaultContract(address(vault));
+        trs.setWalletContract(address(wallet));
+        trs.setVaultContract(address(vault));
+        vault.setWalletContract(address(wallet));
+        vault.setToken(address(LST));
         // Initialize contracts
         tge.init(
           address(LST),
@@ -71,7 +79,7 @@ contract LST_TGE is DSTest {
           saleEndTimestamp
         );
 
-        trs.init(
+        wallet.init(
           totalAvailableTokens,
           initialVestedReleasePercentage
         );
@@ -98,6 +106,9 @@ contract LST_TGE is DSTest {
     }
 
     function test_BuyTokensIfWhitelisted() public {
+      uint256 reserved_;
+      uint256 released_;
+      uint256 withdrawable_;
       // Whitelist TestUser address
       assertTrue(Whitelist.whitelistAddress(address(TestUser)));
       assertEq(
@@ -114,7 +125,7 @@ contract LST_TGE is DSTest {
       );
       // Confirm totalAvailableTokens has been reduced by the LST reserved
       assertEq(
-        trs.totalAvailableTokens(),
+        wallet.totalAvailableTokens(),
         totalAvailableTokens * precision
       );
       // buy LST for 1 ether as TestUser
@@ -125,8 +136,9 @@ contract LST_TGE is DSTest {
         1 ether
       );
       // Confirm 24,000 LST has been reserved for TestUser
+      (reserved_, released_, withdrawable_) = wallet.getStats(address(TestUser));
       assertEq(
-        trs.reservedTokens(address(TestUser)),
+        reserved_,
         LSTRatePerEther * precision
       );
       // Confirm No LST has been minted separately for TestUser
@@ -151,7 +163,7 @@ contract LST_TGE is DSTest {
       );
       // Confirm totalAvailableTokens has been reduced by the LST reserved
       assertEq(
-        trs.totalReservedTokensDuringTGE(),
+        wallet.totalReservedTokensDuringTGE(),
         LSTRatePerEther * precision
       );
     }
@@ -209,37 +221,45 @@ contract LST_TGE is DSTest {
 
     // Tests involving Vesting
     function test_DecisionVesting() public {
+      uint256 reserved_;
+      uint256 released_;
+      uint256 withdrawable_;
       // Whitelist TestUser address
       Whitelist.whitelistAddress(address(TestUser));
       // buy LST for 1 ether as TestUser
       tge.buyTokens.value(1 ether)(address(TestUser));
       // Confirm 1 ether has been contributed by TestUser
       // Confirm 24,000 LST has been reserved for TestUser
+      (reserved_, released_, withdrawable_) = wallet.getStats(address(TestUser));
       assertEq(
-        trs.reservedTokens(address(TestUser)),
+        reserved_,
         LSTRatePerEther * precision
       );
       assertEq(
-        trs.getTotalReservedForVesting(),
+        wallet.getTotalReservedForVesting(),
         0
       );
       bool _vestingDecision = true;
       assert(tge.vestFor(address(TestUser), _vestingDecision));
       assertEq(
-        trs.getTotalReservedForVesting(),
+        wallet.getTotalReservedForVesting(),
         LSTRatePerEther * precision
       );
     }
 
     function testFail_VestWhenPaused() public {
+      uint256 reserved_;
+      uint256 released_;
+      uint256 withdrawable_;
       // Whitelist TestUser address
       Whitelist.whitelistAddress(address(TestUser));
       // buy LST for 1 ether as TestUser
       tge.buyTokens.value(1 ether)(address(TestUser));
       // Confirm 1 ether has been contributed by TestUser
       // Confirm 24,000 LST has been reserved for TestUser
+      (reserved_, released_, withdrawable_) = wallet.getStats(address(TestUser));
       assertEq(
-        trs.reservedTokens(address(TestUser)),
+        reserved_,
         LSTRatePerEther * precision
       );
       // Pause Sale contract
@@ -251,6 +271,9 @@ contract LST_TGE is DSTest {
       User AnotherUser;
       uint256 totalContributions = 0;
       uint256 _amount;
+      uint256 reserved_;
+      uint256 released_;
+      uint256 withdrawable_;
       for (uint256 _i = 1; _i < 201; _i++) {
         AnotherUser = new User();
         // Whitelist TestUser address
@@ -269,52 +292,141 @@ contract LST_TGE is DSTest {
       totalContributions += 2;
       uint256 totalRemainingTokens = (totalAvailableTokens - totalContributions * LSTRatePerEther) * precision;
       assertEq(
-        trs.totalAvailableTokens() - trs.totalReservedTokensDuringTGE(),
+        wallet.totalAvailableTokens() - wallet.totalReservedTokensDuringTGE(),
         totalRemainingTokens
       );
       assert(tge.vestFor(address(TestUser), true));
       uint256 totalVested = (totalContributions) * LSTRatePerEther * precision;
       assertEq(
-        trs.getTotalReservedForVesting(),
+        wallet.getTotalReservedForVesting(),
         totalVested
       );
       uint256 amountVested = 2 * LSTRatePerEther * precision;
+      (reserved_, released_, withdrawable_) = wallet.getStats(address(TestUser));
       assertEq(
-        trs.reservedTokens(address(TestUser)),
+        reserved_,
         amountVested
       );
-      /* uint256 expectedBonus = ((amountVested * totalRemainingBonus) / totalVested);
-      assertEq(
-        Sale.expectedTokensWithBonus(address(TestUser)),
-        amountVested + expectedBonus
-      ); */
     }
 
-    function test_MinimumBonus() public {
+    function test_WithdrawalWithoutVesting() public {
+      uint256 reserved_;
+      uint256 released_;
+      uint256 withdrawable_;
       // Whitelist TestUser address
       Whitelist.whitelistAddress(address(TestUser));
       // buy LST for 1 ether as TestUser
       tge.buyTokens.value(1 ether)(address(TestUser));
-      // Confirm 1 ether has been contributed by TestUser
-      // Confirm 24,000 LST has been reserved for TestUser
+      tge.endPublicTGE();
+      assert(tge.setTRSOffset(0));
       assertEq(
-        trs.reservedTokens(address(TestUser)),
-        LSTRatePerEther * precision
-      );
-      bool _vestingDecision = false;
-      assertEq(
-        trs.minimumBonusFor(address(TestUser), _vestingDecision),
+        wallet.getTotalReservedForVesting(),
         0
       );
-      _vestingDecision = true;
-      assert(tge.vestFor(address(TestUser), _vestingDecision));
+      (reserved_, released_, withdrawable_) = wallet.getStats(address(TestUser));
       assertEq(
-        trs.getTotalReservedForVesting(),
-        LSTRatePerEther * precision
+        reserved_,
+        1 * LSTRatePerEther * precision
       );
       assertEq(
-        trs.minimumBonusFor(address(TestUser), _vestingDecision),
-        125 * LSTRatePerEther * precision / 100
+        released_,
+        0
+      );
+      assertEq(
+        withdrawable_,
+        0
+      );
+      // Confirm vesting decision
+      assert(!tge.isVestedContributor(address(TestUser)));
+      // Withdraw
+      assert(wallet.withdrawFor(address(TestUser)));
+      (reserved_, released_, withdrawable_) = wallet.getStats(address(TestUser));
+      assertEq(
+        reserved_,
+        0
+      );
+      assertEq(
+        released_,
+        0
+      );
+      assertEq(
+        withdrawable_,
+        1 * LSTRatePerEther * precision
+      );
+    }
+
+    function testFail_WithdrawTwiceBeforeTRSStart() public {
+      // Whitelist TestUser address
+      Whitelist.whitelistAddress(address(TestUser));
+      // buy LST for 1 ether as TestUser
+      tge.buyTokens.value(1 ether)(address(TestUser));
+      tge.endPublicTGE();
+      assert(tge.setTRSOffset(0));
+      assert(!tge.isVestedContributor(address(TestUser)));
+      // Withdraw
+      assert(wallet.withdrawFor(address(TestUser)));
+      assert(wallet.withdrawFor(address(TestUser)));
+    }
+
+    function test_WithdrawalWithVesting() public {
+      uint256 vestingAmount = 1 * LSTRatePerEther * precision;
+      uint256 reserved_;
+      uint256 released_;
+      uint256 withdrawable_;
+      // Whitelist TestUser address
+      Whitelist.whitelistAddress(address(TestUser));
+      // buy LST for 1 ether as TestUser
+      tge.buyTokens.value(1 ether)(address(TestUser));
+      tge.endPublicTGE();
+      assert(tge.setTRSOffset(0));
+      assertEq(
+        wallet.getTotalReservedForVesting(),
+        0
+      );
+      (reserved_, released_, withdrawable_) = wallet.getStats(address(TestUser));
+      assertEq(
+        reserved_,
+        vestingAmount
+      );
+      assertEq(
+        released_,
+        0
+      );
+      assertEq(
+        withdrawable_,
+        0
+      );
+      // Vest
+      bool _vestingDecision = true;
+      assert(tge.vestFor(address(TestUser), _vestingDecision));
+      // Confirm vesting decision
+      assert(tge.isVestedContributor(address(TestUser)));
+      assertEq(
+        wallet.getTotalReservedForVesting(),
+        vestingAmount
+      );
+      // Withdraw
+      assert(wallet.setBonusMultiplier());
+      uint256 bonusFraction = totalAvailableTokens * precision / vestingAmount;
+      assertEq(
+        wallet.getBonusMultiplier(),
+        bonusFraction * precision
+      );
+      assert(wallet.withdrawFor(address(TestUser)));
+      (reserved_, released_, withdrawable_) = wallet.getStats(address(TestUser));
+      uint256 expectedReservedAmount = vestingAmount * bonusFraction * (75 * 10**16) / precision;
+      uint256 expectedWithdrawableAmount = vestingAmount * bonusFraction * (25 * 10**16) / precision;
+      assertEq(
+        reserved_,
+        expectedReservedAmount
+      );
+      assertEq(
+        released_,
+        0
+      );
+      assertEq(
+        withdrawable_,
+        expectedWithdrawableAmount
       );
     }
 

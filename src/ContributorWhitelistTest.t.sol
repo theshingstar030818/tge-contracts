@@ -5,7 +5,7 @@ import "./base.sol";
 import "./tge.sol";
 
 
-contract Wallet {
+contract ColdWallet {
   // Wallet contract to accept payment
   function() payable public {}
 }
@@ -20,7 +20,7 @@ contract ContributorWhitelistTest is DSTest {
 
     function test_OnlyOwnerOrCrowdTGEContract() public {
       LendroidSupportToken LST = new LendroidSupportToken();
-      Wallet ColdStorageWallet = new Wallet();
+      ColdWallet ColdStorageWallet = new ColdWallet();
       uint256 saleStartTimestamp = now;
       uint256 saleEndTimestamp = now + 10 days;
       TGE tge = new TGE();
