@@ -22,35 +22,33 @@ contract LendroidSupportToken is MintableToken, PausableToken {
 
 
 contract ContributorWhitelist is HasNoEther, Destructible {
+
+  TGE public TGEContract;
+
   mapping (address => bool) public authorized;
   mapping (address => bool) public whitelist;
 
-  modifier auth() {
-    require((msg.sender == owner) || (authorized[msg.sender]));
+  modifier onlyOwnerOrTGE() {
+    require((msg.sender == owner) || ((address(TGEContract) != 0) && (msg.sender == address(TGEContract))));
     _;
   }
 
-  function setAuthority(address _address) public onlyOwner returns(bool) {
-    authorized[_address] = true;
-    return true;
+  function setTGEContract(address _address) onlyOwner external returns(bool) {
+      TGEContract = TGE(_address);
+      return true;
   }
 
-  function removeAuthority(address _address) public onlyOwner returns(bool) {
-    authorized[_address] = false;
-    return true;
-  }
-
-  function whitelistAddress(address _address) public onlyOwner returns(bool) {
+  function whitelistAddress(address _address) external onlyOwner returns(bool) {
     whitelist[_address] = true;
     return true;
   }
 
-  function blacklistAddress(address _address) public onlyOwner returns(bool) {
+  function blacklistAddress(address _address) external onlyOwner returns(bool) {
     whitelist[_address] = false;
     return true;
   }
 
-  function bulkWhitelistAddresses(address[] addrs) public onlyOwner returns(bool) {
+  function bulkWhitelistAddresses(address[] addrs) external onlyOwner returns(bool) {
     require(addrs.length <= 100);
     for (uint i=0; i<addrs.length; i++) {
       whitelist[addrs[i]] = true;
@@ -58,7 +56,7 @@ contract ContributorWhitelist is HasNoEther, Destructible {
     return true;
   }
 
-  function isWhitelisted(address _address) public auth view returns(bool) {
+  function isWhitelisted(address _address) external onlyOwnerOrTGE view returns(bool) {
     return whitelist[_address];
   }
 
