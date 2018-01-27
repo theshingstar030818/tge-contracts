@@ -25,7 +25,7 @@ contract ContributorWhitelist is HasNoEther, Destructible {
 
   TGE public TGEContract;
 
-  mapping (address => bool) public whitelist;
+  mapping (address => bool) private whitelist;
 
   modifier onlyOwnerOrTGE() {
     require((msg.sender == owner) || ((address(TGEContract) != 0) && (msg.sender == address(TGEContract))));
@@ -162,6 +162,11 @@ contract BaseTGEContract is Pausable, Destructible {
    */
   function endPublicTGE() onlyOwner external returns (bool) {
     publicTGEEndBlockTimeStamp = block.timestamp;
+    return true;
+  }
+
+  function setPublicTGEEndBlockTimeStamp(uint256 _timestamp) onlyOwner external returns (bool) {
+    publicTGEEndBlockTimeStamp = _timestamp;
     return true;
   }
 
@@ -388,7 +393,8 @@ contract TGE is BaseTGEContract {
   // 2 & 3 are valid cases
   // 1 and 4 are invalid because they are double-vesting actions
   function vest(bool _decision) external whenNotPaused returns(bool) {
-    return _vest(msg.sender, _decision);
+    require(_vest(msg.sender, _decision));
+    return true;
   }
 
   function _vest(address _beneficiary, bool _decision) internal returns(bool) {
@@ -396,17 +402,21 @@ contract TGE is BaseTGEContract {
     bool periodDuringTRSOffset = (block.timestamp > publicTGEEndBlockTimeStamp) && (block.timestamp.sub(publicTGEEndBlockTimeStamp) <= TRSOffset);
     require(periodDuringPublicTGE || periodDuringTRSOffset);
     // Prevent double vesting
-    bool doubleVesingDecision = hasVested[_beneficiary] && _decision;
-    bool doubleNonVestingDecision = !hasVested[_beneficiary] && !_decision;
-    require(!doubleVesingDecision || !doubleNonVestingDecision);
+    if (hasVested[_beneficiary]) {
+      require(!_decision);
+    }
+    if (!hasVested[_beneficiary]) {
+      require(_decision);
+    }
+    hasVested[_beneficiary] = _decision;
     // Update totalReservedForVesting based on vesting decision
     require(WalletContract.updateReservedTokens(_beneficiary, 0, _decision, true));
-    hasVested[_beneficiary] = _decision;
     return true;
   }
 
   function vestFor(address _beneficiary, bool _decision) external onlyOwner whenNotPaused returns(bool) {
-    return _vest(_beneficiary, _decision);
+    require(_vest(_beneficiary, _decision));
+    return true;
   }
 
   function isVestedContributor(address _beneficiary) external view onlyOwnerOrWallet returns(bool) {
@@ -488,7 +498,10 @@ contract Wallet is HasNoEther, Pausable, Destructible {
   }
 
   function setBonusMultiplier() onlyOwner external returns(bool) {
-      bonusMultiplier = totalAvailableTokens.mul(precision).div(totalReservedForVesting);
+      /* uint256 totalNonVestedAmount = totalReservedTokensDuringTGE.sub(totalReservedForVesting);
+      uint256 totalAvailableForDistribution = totalAvailableTokens.sub(totalNonVestedAmount); */
+      uint256 totalAvailableForDistribution = totalAvailableTokens.sub(totalReservedTokensDuringTGE).add(totalReservedForVesting);
+      bonusMultiplier = totalAvailableForDistribution.mul(precision).div(totalReservedForVesting);
       return true;
   }
 
@@ -510,11 +523,12 @@ contract Wallet is HasNoEther, Pausable, Destructible {
   // _updateOnlyTotal is true only when called by TGE.vest()
   function updateReservedTokens(address _beneficiary, uint256 _tokens, bool _vestingDecision, bool _updateOnlyTotal) external onlyTGE returns(bool) {
     if (_updateOnlyTotal) {
+      uint256 _reservedTokenAmount = reservedTokens[_beneficiary];
       if (_vestingDecision) {
-        totalReservedForVesting = totalReservedForVesting.add(reservedTokens[_beneficiary]);
+        totalReservedForVesting = totalReservedForVesting.add(_reservedTokenAmount);
       }
       else {
-        totalReservedForVesting = totalReservedForVesting.sub(reservedTokens[_beneficiary]);
+        totalReservedForVesting = totalReservedForVesting.sub(_reservedTokenAmount);
       }
     }
     else {
@@ -567,11 +581,13 @@ contract Wallet is HasNoEther, Pausable, Destructible {
   }
 
   function withdraw() external whenNotPaused returns(bool) {
-    return _withdraw(msg.sender);
+    require(_withdraw(msg.sender));
+    return true;
   }
 
   function withdrawFor(address _beneficiary) external onlyOwner returns(bool) {
-    return _withdraw(_beneficiary);
+    require(_withdraw(_beneficiary));
+    return true;
   }
 
   // BulkWithdraw
@@ -579,8 +595,8 @@ contract Wallet is HasNoEther, Pausable, Destructible {
     require(addrs.length <= 100);
     for (uint i=0; i<addrs.length; i++) {
       if (tokenWithdrawalActivated && withdrawable[addrs[i]] > 0) {
-        require(VaultContract.transferTokens(addrs[i], withdrawable[addrs[i]]));
         withdrawable[addrs[i]] = 0;
+        require(VaultContract.transferTokens(addrs[i], withdrawable[addrs[i]]));
       }
     }
     return true;

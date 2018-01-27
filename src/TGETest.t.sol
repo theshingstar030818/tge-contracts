@@ -267,6 +267,24 @@ contract LST_TGE is DSTest {
       assert(tge.vestFor(address(TestUser), true));
     }
 
+    function testFail_DoubleVestTrue() public {
+      // Whitelist TestUser address
+      Whitelist.whitelistAddress(address(TestUser));
+      // buy LST for 1 ether as TestUser
+      tge.buyTokens.value(1 ether)(address(TestUser));
+      assert(tge.vestFor(address(TestUser), true));
+      assert(tge.vestFor(address(TestUser), true));
+    }
+
+    function testFail_DoubleVestFalse() public {
+      // Whitelist TestUser address
+      Whitelist.whitelistAddress(address(TestUser));
+      // buy LST for 1 ether as TestUser
+      tge.buyTokens.value(1 ether)(address(TestUser));
+      assert(tge.vestFor(address(TestUser), false));
+      assert(tge.vestFor(address(TestUser), false));
+    }
+
     function test_MultipleVestedContributors() public {
       User AnotherUser;
       uint256 totalContributions = 0;
@@ -401,24 +419,22 @@ contract LST_TGE is DSTest {
       assert(tge.vestFor(address(TestUser), _vestingDecision));
       // Confirm vesting decision
       assert(tge.isVestedContributor(address(TestUser)));
-      assertEq(
-        wallet.getTotalReservedForVesting(),
-        vestingAmount
-      );
+      uint256 totalVestedAmount = wallet.getTotalReservedForVesting();
+      uint256 totalNonVestedAmount = wallet.totalReservedTokensDuringTGE() - totalVestedAmount;
+      uint256 totalDistributableAmount = wallet.totalAvailableTokens() - totalNonVestedAmount;
       // Withdraw
       assert(wallet.setBonusMultiplier());
-      uint256 bonusFraction = totalAvailableTokens * precision / vestingAmount;
+      /* uint256 bonusFraction = totalAvailableTokens * precision / vestingAmount;
       assertEq(
         wallet.getBonusMultiplier(),
         bonusFraction * precision
-      );
+      ); */
       assert(wallet.withdrawFor(address(TestUser)));
       (reserved_, released_, withdrawable_) = wallet.getStats(address(TestUser));
-      uint256 expectedReservedAmount = vestingAmount * bonusFraction * (75 * 10**16) / precision;
-      uint256 expectedWithdrawableAmount = vestingAmount * bonusFraction * (25 * 10**16) / precision;
+      uint256 expectedReservedAmountWithBonus = vestingAmount * (totalDistributableAmount) / totalVestedAmount;
       assertEq(
         reserved_,
-        expectedReservedAmount
+        expectedReservedAmountWithBonus * (75 * 10**16) / precision
       );
       assertEq(
         released_,
@@ -426,7 +442,66 @@ contract LST_TGE is DSTest {
       );
       assertEq(
         withdrawable_,
-        expectedWithdrawableAmount
+        expectedReservedAmountWithBonus * (25 * 10**16) / precision
+      );
+    }
+
+    function test_WithdrawalWithMultipleVestedContributors() public {
+      User AnotherUser;
+      uint256 _amount;
+      uint256 reserved_;
+      uint256 released_;
+      uint256 withdrawable_;
+      for (uint256 _i = 1; _i < 201; _i++) {
+        AnotherUser = new User();
+        // Whitelist TestUser address
+        Whitelist.whitelistAddress(address(AnotherUser));
+        // buy LST for 101 ether as TestUser
+        _amount = (_i+5);
+        tge.buyTokens.value(_amount * 1 ether)(address(AnotherUser));
+        if (_i % 2 == 0) {
+          assert(tge.vestFor(address(AnotherUser), true));
+        }
+      }
+
+      // Whitelist TestUser address
+      Whitelist.whitelistAddress(address(TestUser));
+      // buy LST for 1 ether as TestUser
+      tge.buyTokens.value(2 ether)(address(TestUser));
+      assert(tge.vestFor(address(TestUser), true));
+      
+      uint256 vestingAmount = 2 * LSTRatePerEther * precision;
+      (reserved_, released_, withdrawable_) = wallet.getStats(address(TestUser));
+      assertEq(
+        reserved_,
+        vestingAmount
+      );
+      tge.endPublicTGE();
+      assert(tge.setTRSOffset(0));
+      // Withdraw
+      assert(wallet.setBonusMultiplier());
+
+
+      uint256 totalVestedAmount = wallet.getTotalReservedForVesting();
+      uint256 totalNonVestedAmount = wallet.totalReservedTokensDuringTGE() - totalVestedAmount;
+      uint256 totalDistributableAmount = wallet.totalAvailableTokens() - totalNonVestedAmount;
+
+      uint256 bonusMultiplier = totalDistributableAmount * precision / totalVestedAmount;
+
+      assert(wallet.withdrawFor(address(TestUser)));
+      (reserved_, released_, withdrawable_) = wallet.getStats(address(TestUser));
+      uint256 expectedReservedAmountWithBonus = vestingAmount * bonusMultiplier / precision;
+      assertEq(
+        reserved_,
+        expectedReservedAmountWithBonus * (75 * 10**16) / precision
+      );
+      assertEq(
+        released_,
+        0
+      );
+      assertEq(
+        withdrawable_,
+        expectedReservedAmountWithBonus * (25 * 10**16) / precision
       );
     }
 
