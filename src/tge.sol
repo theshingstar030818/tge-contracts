@@ -21,7 +21,7 @@ contract LendroidSupportToken is MintableToken, PausableToken {
 }
 
 
-contract ContributorWhitelist is HasNoEther, Destructible {
+contract ContributorWhitelist is PausableDestructibleHasNoEther {
 
   TGE public TGEContract;
 
@@ -69,7 +69,7 @@ contract ContributorWhitelist is HasNoEther, Destructible {
  * the conact will assign them tokens based on a token per ETH rate.
  * Funds collected are forwarded to a coldStorageWallet as they arrive.
  */
-contract BaseTGEContract is Pausable, Destructible {
+contract BaseTGEContract is PausableDestructible {
   using SafeMath for uint256;
 
   // start and end timestamps (both inclusive) when sale is open
@@ -265,12 +265,6 @@ contract BaseTGEContract is Pausable, Destructible {
     );
   }
 
-  /**
-   * @dev Transfer all Ether held by the contract to the owner.
-   */
-  function escapeHatchTransferRemainingBalance() whenPaused external onlyOwner {
-    owner.transfer(this.balance);
-  }
 }
 
 
@@ -398,15 +392,18 @@ contract TGE is BaseTGEContract {
   }
 
   function _vest(address _beneficiary, bool _decision) internal returns(bool) {
-    bool periodDuringPublicTGE = block.timestamp <= publicTGEEndBlockTimeStamp;
-    bool periodDuringTRSOffset = (block.timestamp > publicTGEEndBlockTimeStamp) && (block.timestamp.sub(publicTGEEndBlockTimeStamp) <= TRSOffset);
-    require(periodDuringPublicTGE || periodDuringTRSOffset);
+    uint256 _reservedAmount = WalletContract.getReservedTokenAmount(_beneficiary);
+    require(_reservedAmount > 0);
     // Prevent double vesting
     if (hasVested[_beneficiary]) {
       require(!_decision);
     }
     if (!hasVested[_beneficiary]) {
       require(_decision);
+    }
+    // Ensure vesting cannot be done once TRS starts
+    if (block.timestamp > publicTGEEndBlockTimeStamp) {
+      require(block.timestamp.sub(publicTGEEndBlockTimeStamp) <= TRSOffset);
     }
     hasVested[_beneficiary] = _decision;
     // Update totalReservedForVesting based on vesting decision
@@ -426,7 +423,7 @@ contract TGE is BaseTGEContract {
 }
 
 
-contract Wallet is HasNoEther, Pausable, Destructible {
+contract Wallet is PausableDestructibleHasNoEther {
 
   using SafeMath for uint256;
   Vault public VaultContract;
@@ -637,10 +634,14 @@ contract Wallet is HasNoEther, Pausable, Destructible {
     return hasWithdrawnBeforeTRS[_beneficiary];
   }
 
+  function getReservedTokenAmount(address _beneficiary) onlyTGE external view returns(uint256) {
+    return reservedTokens[_beneficiary];
+  }
+
 }
 
 
-contract TRS is HasNoEther, Pausable, Destructible {
+contract TRS is PausableDestructibleHasNoEther {
 
   using SafeMath for uint256;
 
@@ -898,7 +899,7 @@ contract TRS is HasNoEther, Pausable, Destructible {
 }
 
 
-contract Vault is HasNoEther, Pausable, Destructible {
+contract Vault is PausableDestructibleHasNoEther {
 
   using SafeMath for uint256;
 

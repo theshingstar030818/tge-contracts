@@ -79,27 +79,6 @@ contract Ownable {
 
 
 /**
- * @title Destructible
- * @dev Base contract that can be destroyed by owner. All funds in contract will be sent to the owner.
- */
-contract Destructible is Ownable {
-
-  function Destructible() public payable { }
-
-  /**
-   * @dev Transfers the current balance to the owner and terminates the contract.
-   */
-  function destroy() onlyOwner public {
-    selfdestruct(owner);
-  }
-
-  /* function destroyAndSend(address _recipient) onlyOwner public {
-    selfdestruct(_recipient);
-  } */
-}
-
-
-/**
  * @title Pausable
  * @dev Base contract which allows children to implement an emergency stop mechanism.
  */
@@ -362,17 +341,64 @@ contract MintableToken is StandardToken, Ownable {
 }
 
 
-/**
- * @title Contracts that should not own Ether
- * @author Remco Bloemen <remco@2π.com>
- * @dev This tries to block incoming ether to prevent accidental loss of Ether. Should Ether end up
- * in the contract, it will allow the owner to reclaim this ether.
- * @notice Ether can still be send to this contract by:
- * calling functions labeled `payable`
- * `selfdestruct(contract_address)`
- * mining directly to the contract address
-*/
-contract HasNoEther is Ownable {
+contract PausableDestructible is Ownable{
+
+  event Pause();
+  event Unpause();
+
+  bool public paused = false;
+
+  /**
+   * @dev Modifier to make a function callable only when the contract is not paused.
+   */
+  modifier whenNotPaused() {
+    require(!paused);
+    _;
+  }
+
+  /**
+   * @dev Modifier to make a function callable only when the contract is paused.
+   */
+  modifier whenPaused() {
+    require(paused);
+    _;
+  }
+
+  /**
+   * @dev called by the owner to pause, triggers stopped state
+   */
+  function pause() onlyOwner whenNotPaused external {
+    paused = true;
+    Pause();
+  }
+
+  /**
+   * @dev called by the owner to unpause, returns to normal state
+   */
+  function unpause() onlyOwner whenPaused external {
+    paused = false;
+    Unpause();
+  }
+
+  /**
+   * @dev Transfers the current balance to the owner and terminates the contract.
+   */
+  function reclaimEtherOrDestroy(bool _destroy) external onlyOwner whenPaused returns(bool) {
+    if (_destroy) {
+      selfdestruct(owner);
+      return true;
+    }
+    /* else {
+      owner.transfer(this.balance);
+      return true;
+    } */
+    return false;
+  }
+
+}
+
+
+contract PausableDestructibleHasNoEther is PausableDestructible {
 
   /**
   * @dev Constructor that rejects incoming Ether
@@ -381,20 +407,13 @@ contract HasNoEther is Ownable {
   * constructor. By doing it this way we prevent a payable constructor from working. Alternatively
   * we could use assembly to access msg.value.
   */
-  function HasNoEther() public payable {
+  function PausableDestructibleHasNoEther() public payable {
     require(msg.value == 0);
   }
 
   /**
    * @dev Disallows direct send by settings a default function without the `payable` flag.
    */
-  function() external {
-  }
+  function() external {}
 
-  /**
-   * @dev Transfer all Ether held by the contract to the owner.
-   */
-  function reclaimEther() external onlyOwner {
-    assert(owner.send(this.balance));
-  }
 }
