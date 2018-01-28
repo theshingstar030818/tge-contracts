@@ -172,25 +172,22 @@ contract BaseTGEContract is PausableDestructible {
 
   function saveContribution(address beneficiary, uint256 weiAmount, bool _isPrivateTGE) internal {
     // save contribution
-    contributions[beneficiary].push(Contribution({
-        timestamp: block.timestamp,
-        WEIContributed: weiAmount,
-        LST_WEI_rate: rate,
-        isPrivateTGE: _isPrivateTGE
-      })
-    );
+    Contribution memory _c;
+    _c.timestamp = block.timestamp;
+    _c.WEIContributed = weiAmount;
+    _c.LST_WEI_rate = rate;
+    _c.isPrivateTGE = _isPrivateTGE;
+    contributions[beneficiary].push(_c);
   }
 
   function removeContribution(address beneficiary, uint256 weiAmount, bool _isPrivateTGE) internal {
     // save contribution
-    contributionsRemoved[beneficiary].push(
-      ContributionRemoved({
-        timestamp: block.timestamp,
-        WEIRemoved: weiAmount,
-        LST_WEI_rate: rate,
-        isPrivateTGE: _isPrivateTGE
-      })
-    );
+    ContributionRemoved memory _c;
+    _c.timestamp = block.timestamp;
+    _c.WEIRemoved = weiAmount;
+    _c.LST_WEI_rate = rate;
+    _c.isPrivateTGE = _isPrivateTGE;
+    contributionsRemoved[beneficiary].push(_c);
   }
 
   // send ether to the fund collection fundsWallet

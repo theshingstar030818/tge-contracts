@@ -463,13 +463,11 @@ contract LST_TGE is DSTest {
           assert(tge.vestFor(address(AnotherUser), true));
         }
       }
-
       // Whitelist TestUser address
       Whitelist.whitelistAddress(address(TestUser));
       // buy LST for 1 ether as TestUser
       tge.buyTokens.value(2 ether)(address(TestUser));
       assert(tge.vestFor(address(TestUser), true));
-      
       uint256 vestingAmount = 2 * LSTRatePerEther * precision;
       (reserved_, released_, withdrawable_) = wallet.getStats(address(TestUser));
       assertEq(
