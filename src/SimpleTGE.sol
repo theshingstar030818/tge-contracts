@@ -40,26 +40,6 @@ library SafeMath {
  */
 
 
-contract PausableDestructibleHasNoEther is PausableDestructible {
-
-   /**
-   * @dev Constructor that rejects incoming Ether
-   * @dev The `payable` flag is added so we can access `msg.value` without compiler warning. If we
-   * leave out payable, then Solidity will allow inheriting contracts to implement a payable
-   * constructor. By doing it this way we prevent a payable constructor from working. Alternatively
-   * we could use assembly to access msg.value.
-   */
-   function PausableDestructibleHasNoEther() public payable {
-     require(msg.value == 0);
-   }
-
-   /**
-    * @dev Disallows direct send by settings a default function without the `payable` flag.
-    */
-   function() external {}
-
-}
-
 contract Ownable {
   address public owner;
 
@@ -96,9 +76,89 @@ contract Ownable {
 }
 
 
+ contract PausableDestructible is Ownable{
+
+   event Pause();
+   event Unpause();
+
+   bool public paused = false;
+
+   /**
+    * @dev Modifier to make a function callable only when the contract is not paused.
+    */
+   modifier whenNotPaused() {
+     require(!paused);
+     _;
+   }
+
+   /**
+    * @dev Modifier to make a function callable only when the contract is paused.
+    */
+   modifier whenPaused() {
+     require(paused);
+     _;
+   }
+
+   /**
+    * @dev called by the owner to pause, triggers stopped state
+    */
+   function pause() onlyOwner whenNotPaused external {
+     paused = true;
+     Pause();
+   }
+
+   /**
+    * @dev called by the owner to unpause, returns to normal state
+    */
+   function unpause() onlyOwner whenPaused external {
+     paused = false;
+     Unpause();
+   }
+
+   /**
+    * @dev Transfers the current balance to the owner and terminates the contract.
+    */
+   function reclaimEtherOrDestroy(bool _destroy) external onlyOwner whenPaused returns(bool) {
+     if (_destroy) {
+       selfdestruct(owner);
+       return true;
+     }
+     /* else {
+       owner.transfer(this.balance);
+       return true;
+     } */
+     return false;
+   }
+
+ }
+
+
+
+
+contract PausableDestructibleHasNoEther is PausableDestructible {
+
+   /**
+   * @dev Constructor that rejects incoming Ether
+   * @dev The `payable` flag is added so we can access `msg.value` without compiler warning. If we
+   * leave out payable, then Solidity will allow inheriting contracts to implement a payable
+   * constructor. By doing it this way we prevent a payable constructor from working. Alternatively
+   * we could use assembly to access msg.value.
+   */
+   function PausableDestructibleHasNoEther() public payable {
+     require(msg.value == 0);
+   }
+
+   /**
+    * @dev Disallows direct send by settings a default function without the `payable` flag.
+    */
+   function() external {}
+
+}
+
+
 contract ContributorWhitelist is PausableDestructibleHasNoEther {
 
-  TGE public TGEContract;
+  SimpleTGE public TGEContract;
 
   mapping (address => bool) public whitelist;
 
@@ -108,7 +168,7 @@ contract ContributorWhitelist is PausableDestructibleHasNoEther {
   }
 
   function setTGEContract(address _address) onlyOwner external returns(bool) {
-      TGEContract = TGE(_address);
+      TGEContract = SimpleTGE(_address);
       return true;
   }
 
@@ -152,10 +212,10 @@ contract SimpleTGE is Ownable {
   uint256 public weiRaised;
 
   // sale cap in wei
-  uint256 public totalCap;
+  uint256 public totalCapInWei;
 
   // individual cap in wei
-  uint256 public individualCap;
+  uint256 public individualCapInWei;
 
   // contract that holds the whitelisted address
   ContributorWhitelist public whitelist;
@@ -192,39 +252,28 @@ contract SimpleTGE is Ownable {
     _beneficiary.transfer(this.balance);
   }
 
-
-  function SimpleTGE public(
-    address _fundsWallet,
-    uint256 _publicTGEStartBlockTimeStamp,
-    uint256 _publicTGEEndBlockTimeStamp,
-    uint256 _individualCap,
-    uint256 _totalCap
-  )
-  {
+  function SimpleTGE (address _fundsWallet,uint256 _publicTGEStartBlockTimeStamp,uint256 _publicTGEEndBlockTimeStamp,uint256 _individualCapInWei,uint256 _totalCapInWei) {
     require(_publicTGEStartBlockTimeStamp >= block.timestamp);
     require(_publicTGEEndBlockTimeStamp >= _publicTGEStartBlockTimeStamp);
     require(_fundsWallet != address(0));
-    require(_individualCap > 0);
-    require(_totalCap > 0);
+    require(_individualCapInWei > 0);
+    require(_totalCapInWei > 0);
 
     fundsWallet = _fundsWallet;
     publicTGEStartBlockTimeStamp = _publicTGEStartBlockTimeStamp;
     publicTGEEndBlockTimeStamp = _publicTGEEndBlockTimeStamp;
-    individualCap = _individualCap;
-    totalCap = _totalCap;
+    individualCapInWei = _individualCapInWei;
+    totalCapInWei = _totalCapInWei;
   }
 
   // allows changing the individual cap.
-  function changeIndividualCap(uint256 _individualCap) onlyOwner external returns(bool) {
-      require(_individualCap > 0);
-      individualCap = _individualCap;
+  function changeindividualCapInWei(uint256 _individualCapInWei) onlyOwner external returns(bool) {
+      require(_individualCapInWei > 0);
+      individualCapInWei = _individualCapInWei;
       return true;
   }
 
-  // fallback function can be used to buy tokens
-  function () external payable {
-    contributeWithoutVesting();
-  }
+
 
   // low level token purchase function
   function contribute(bool _vestingDecision) internal{
@@ -232,34 +281,39 @@ contract SimpleTGE is Ownable {
     require(msg.sender != address(0));
     require(msg.value != 0);
     require(whitelist.isWhitelisted(msg.sender));
-    require(weiRaised  + msg.value <= totalCap);
-    require(contributions[msg.sender].weiContributed  + msg.value <= individualCap);
+    require(weiRaised  + msg.value <= totalCapInWei);
+    require(contributions[msg.sender].weiContributed  + msg.value <= individualCapInWei);
 
     contributions[msg.sender].weiContributed = contributions[msg.sender].weiContributed.add(msg.value);
 
     if ((contributors.length == 0) || (contributors[0] != msg.sender)) {
         contributors.push(msg.sender);
     }
-    weiRaised = weiRaised.add(msg.value);
 
+    weiRaised = weiRaised.add(msg.value);
+    contributions[msg.sender].hasVested = _vestingDecision;
     fundsWallet.transfer(msg.value);
   }
 
-  function contributeAndVest() public whilePublicTGEIsActive payable {
+  function contributeAndVest() external whilePublicTGEIsActive payable {
     bool _vestingDecision = true;
-    contribute(_vestingDecision)
+    contribute(_vestingDecision);
   }
 
   function contributeWithoutVesting() public whilePublicTGEIsActive payable {
     bool _vestingDecision = false;
-    contribute(_vestingDecision)
+    contribute(_vestingDecision);
   }
 
+  // fallback function can be used to buy tokens
+  function () external payable {
+    contributeWithoutVesting();
+  }
   // Vesting logic
   // The following cases are checked for _beneficiary's actions:
   function vest(bool _vestingDecision) external returns(bool) {
     bool existingDecision = contributions[msg.sender].hasVested;
-    require(existingDecision != _vestingDecision)
+    require(existingDecision != _vestingDecision);
     // Ensure vesting cannot be done once TRS starts
     if (block.timestamp > publicTGEEndBlockTimeStamp) {
       require(block.timestamp.sub(publicTGEEndBlockTimeStamp) <= TRSOffset);
