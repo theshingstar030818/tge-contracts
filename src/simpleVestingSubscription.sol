@@ -68,7 +68,7 @@ contract Ownable {
 
 }
 
-contract SimpleTGE is Ownable {
+contract SimpleVestingSubscription is Ownable {
   using SafeMath for uint256;
 
   // start and end timestamps (both inclusive) when sale is open
@@ -76,59 +76,14 @@ contract SimpleTGE is Ownable {
 
   uint256 public publicTGEEndBlockTimeStamp;
 
-  // address where funds are collected
-  address public fundsWallet;
-
-  // amount of raised money in wei
-  uint256 public weiRaised;
-
-  // sale cap in wei
-  uint256 public totalCapInWei;
-
-  // individual cap in wei
-  uint256 public individualCapInWei;
-
   // how long the TRS subscription is open after the TGE.
   uint256 public TRSOffset = 5 days;
-
-  mapping (address => bool) public whitelist;
 
   address[] public contributors;
   struct Contribution {
     bool hasVested;
-    uint256 weiContributed;
   }
-
   mapping (address => Contribution)  public contributions;
-
-  modifier whilePublicTGEIsActive() {
-    require(block.timestamp >= publicTGEStartBlockTimeStamp && block.timestamp <= publicTGEEndBlockTimeStamp);
-
-    _;
-  }
-
-  modifier isWhitelisted() {
-    require(whitelist[msg.sender]);
-    _;
-  }
-
-  function blacklistAddresses(address[] addrs) external onlyOwner returns(bool) {
-    require(addrs.length <= 100);
-    for (uint i=0; i<addrs.length; i++) {
-      require(addrs[i] != address(0));
-      whitelist[addrs[i]] = false;
-    }
-    return true;
-  }
-
-  function whitelistAddresses(address[] addrs) external onlyOwner returns(bool) {
-    require(addrs.length <= 100);
-    for (uint i=0; i<addrs.length; i++) {
-      require(addrs[i] != address(0));
-      whitelist[addrs[i]] = true;
-    }
-    return true;
-  }
 
   /**
    * @dev Transfer all Ether held by the contract to the address specified by owner.
@@ -137,64 +92,19 @@ contract SimpleTGE is Ownable {
     _beneficiary.transfer(this.balance);
   }
 
-  function SimpleTGE (address _fundsWallet,uint256 _publicTGEStartBlockTimeStamp,uint256 _publicTGEEndBlockTimeStamp,uint256 _individualCapInWei,uint256 _totalCapInWei) {
+  function SimpleVestingSubscription (uint256 _publicTGEStartBlockTimeStamp,uint256 _publicTGEEndBlockTimeStamp) {
     require(_publicTGEStartBlockTimeStamp >= block.timestamp);
     require(_publicTGEEndBlockTimeStamp >= _publicTGEStartBlockTimeStamp);
-    require(_fundsWallet != address(0));
-    require(_individualCapInWei > 0);
-    require(_totalCapInWei > 0);
-
-    fundsWallet = _fundsWallet;
     publicTGEStartBlockTimeStamp = _publicTGEStartBlockTimeStamp;
     publicTGEEndBlockTimeStamp = _publicTGEEndBlockTimeStamp;
-    individualCapInWei = _individualCapInWei;
-    totalCapInWei = _totalCapInWei;
-  }
-
-  // allows changing the individual cap.
-  function changeindividualCapInWei(uint256 _individualCapInWei) onlyOwner external returns(bool) {
-      require(_individualCapInWei > 0);
-      individualCapInWei = _individualCapInWei;
-      return true;
-  }
-
-  // low level token purchase function
-  function contribute(bool _vestingDecision) internal{
-    //validations
-    require(msg.sender != address(0));
-    require(msg.value != 0);
-    require(weiRaised  + msg.value <= totalCapInWei);
-    require(contributions[msg.sender].weiContributed  + msg.value <= individualCapInWei);
-    // if we have not received any WEI from this address until now, then we add this address to contributors list.
-    if (contributions[msg.sender].weiContributed == 0){
-      contributors.push(msg.sender);
-    }
-    contributions[msg.sender].weiContributed = contributions[msg.sender].weiContributed.add(msg.value);
-    weiRaised = weiRaised.add(msg.value);
-    contributions[msg.sender].hasVested = _vestingDecision;
-    fundsWallet.transfer(msg.value);
-  }
-
-  function contributeAndVest() external whilePublicTGEIsActive isWhitelisted payable {
-    contribute(true);
-  }
-
-  function contributeWithoutVesting() public whilePublicTGEIsActive isWhitelisted payable {
-    contribute(false);
-  }
-
-  // fallback function can be used to buy tokens
-  function () external payable {
-    contributeWithoutVesting();
   }
 
   // Vesting logic
   // The following cases are checked for _beneficiary's actions:
-  function vest(bool _vestingDecision) external isWhitelisted returns(bool) {
+  function vest(bool _vestingDecision) external returns(bool) {
     bool existingDecision = contributions[msg.sender].hasVested;
     require(existingDecision != _vestingDecision);
     require(block.timestamp >= publicTGEStartBlockTimeStamp);
-    require(contributions[msg.sender].weiContributed > 0);
     // Ensure vesting cannot be done once TRS starts
     if (block.timestamp > publicTGEEndBlockTimeStamp) {
       require(block.timestamp.sub(publicTGEEndBlockTimeStamp) <= TRSOffset);
