@@ -38,6 +38,28 @@ library SafeMath {
  * @dev The Ownable contract has an owner address, and provides basic authorization control
  * functions, this simplifies the implementation of "user permissions".
  */
+
+
+contract PausableDestructibleHasNoEther is PausableDestructible {
+
+   /**
+   * @dev Constructor that rejects incoming Ether
+   * @dev The `payable` flag is added so we can access `msg.value` without compiler warning. If we
+   * leave out payable, then Solidity will allow inheriting contracts to implement a payable
+   * constructor. By doing it this way we prevent a payable constructor from working. Alternatively
+   * we could use assembly to access msg.value.
+   */
+   function PausableDestructibleHasNoEther() public payable {
+     require(msg.value == 0);
+   }
+
+   /**
+    * @dev Disallows direct send by settings a default function without the `payable` flag.
+    */
+   function() external {}
+
+}
+
 contract Ownable {
   address public owner;
 
@@ -74,10 +96,50 @@ contract Ownable {
 }
 
 
+contract ContributorWhitelist is PausableDestructibleHasNoEther {
+
+  TGE public TGEContract;
+
+  mapping (address => bool) public whitelist;
+
+  modifier onlyOwnerOrTGE() {
+    require((msg.sender == owner) || ((address(TGEContract) != 0) && (msg.sender == address(TGEContract))));
+    _;
+  }
+
+  function setTGEContract(address _address) onlyOwner external returns(bool) {
+      TGEContract = TGE(_address);
+      return true;
+  }
+
+  function whitelistAddress(address _address) external onlyOwner returns(bool) {
+    whitelist[_address] = true;
+    return true;
+  }
+
+  function blacklistAddress(address _address) external onlyOwner returns(bool) {
+    whitelist[_address] = false;
+    return true;
+  }
+
+  function bulkWhitelistAddresses(address[] addrs) external onlyOwner returns(bool) {
+    require(addrs.length <= 100);
+    for (uint i=0; i<addrs.length; i++) {
+      whitelist[addrs[i]] = true;
+    }
+    return true;
+  }
+
+  function isWhitelisted(address _address) external onlyOwnerOrTGE view returns(bool) {
+    return whitelist[_address];
+  }
+
+}
+
+
+
 contract SimpleTGE is Ownable {
   using SafeMath for uint256;
-
-  uint256 constant public precision = 10 ** 18;
 
   // start and end timestamps (both inclusive) when sale is open
   uint256 public publicTGEStartBlockTimeStamp;
@@ -85,9 +147,6 @@ contract SimpleTGE is Ownable {
 
   // address where funds are collected
   address public fundsWallet;
-
-  // how many token units a buyer gets per ether
-  uint256 public rate;
 
   // amount of raised money in wei
   uint256 public weiRaised;
@@ -98,115 +157,115 @@ contract SimpleTGE is Ownable {
   // individual cap in wei
   uint256 public individualCap;
 
+  // contract that holds the whitelisted address
+  ContributorWhitelist public whitelist;
 
   uint256 public TRSOffset = 7 days;
-  mapping (address => bool) private hasVested;
 
-  mapping (address => uint256) public weiContributed;
-  mapping (address => uint256) private reservedTokens;
 
-  address[] private contributors;
-  mapping (address => uint256) private contributorIndex;
+  address[] public contributors;
+  struct Contribution {
+    bool hasVested;
+    uint256 weiContributed;
+  }
+  mapping (address => Contribution)  public contributions;
+
 
   modifier whilePublicTGEIsActive() {
-    require(block.timestamp <= publicTGEEndBlockTimeStamp);
+    require(block.timestamp >= publicTGEStartBlockTimeStamp && block.timestamp <= publicTGEEndBlockTimeStamp);
+
     _;
   }
 
-  // send ether to the fund collection fundsWallet
-  // override to create custom fund forwarding mechanisms
-  function forwardFunds() internal {
-    fundsWallet.transfer(msg.value);
+
+  function setWhitelist(address _address) onlyOwner external returns (bool) {
+    whitelist = ContributorWhitelist(_address);
+    return true;
   }
 
-  // @return true if the transaction can buy tokens
-  function validPurchase() internal view returns (bool) {
-    bool withinPeriod = block.timestamp >= publicTGEStartBlockTimeStamp && block.timestamp <= publicTGEEndBlockTimeStamp;
-    bool nonZeroPurchase = msg.value != 0;
-    return withinPeriod && nonZeroPurchase;
-  }
+
 
   /**
    * @dev Transfer all Ether held by the contract to the address specified by owner.
    */
   function reclaimEther(address _beneficiary) external onlyOwner {
-    assert(_beneficiary.send(this.balance));
+    _beneficiary.transfer(this.balance);
   }
 
-  function init(
-    uint256 _rate,
+
+  function SimpleTGE public(
     address _fundsWallet,
     uint256 _publicTGEStartBlockTimeStamp,
     uint256 _publicTGEEndBlockTimeStamp,
     uint256 _individualCap,
     uint256 _totalCap
-  ) onlyOwner external returns(bool) {
+  )
+  {
     require(_publicTGEStartBlockTimeStamp >= block.timestamp);
     require(_publicTGEEndBlockTimeStamp >= _publicTGEStartBlockTimeStamp);
-    require(_rate > 0);
     require(_fundsWallet != address(0));
+    require(_individualCap > 0);
+    require(_totalCap > 0);
 
-    rate = _rate;
     fundsWallet = _fundsWallet;
     publicTGEStartBlockTimeStamp = _publicTGEStartBlockTimeStamp;
     publicTGEEndBlockTimeStamp = _publicTGEEndBlockTimeStamp;
-    individualCap = _individualCap * precision;
-    totalCap = _totalCap * precision;
-    return true;
+    individualCap = _individualCap;
+    totalCap = _totalCap;
+  }
+
+  // allows changing the individual cap.
+  function changeIndividualCap(uint256 _individualCap) onlyOwner external returns(bool) {
+      require(_individualCap > 0);
+      individualCap = _individualCap;
+      return true;
   }
 
   // fallback function can be used to buy tokens
   function () external payable {
-    contribute();
+    contributeWithoutVesting();
   }
 
   // low level token purchase function
-  function contribute() public whilePublicTGEIsActive payable {
+  function contribute(bool _vestingDecision) internal{
+    //validations
     require(msg.sender != address(0));
-    require(block.timestamp >= publicTGEStartBlockTimeStamp && validPurchase());
-    // update state
-    weiContributed[msg.sender] = weiContributed[msg.sender].add(msg.value);
-    require(weiContributed[msg.sender] <= individualCap);
-    if ((contributors.length == 0) || (contributorIndex[msg.sender] == 0 && contributors[0] != msg.sender)) {
-        contributorIndex[msg.sender] = contributors.length;
+    require(msg.value != 0);
+    require(whitelist.isWhitelisted(msg.sender));
+    require(weiRaised  + msg.value <= totalCap);
+    require(contributions[msg.sender].weiContributed  + msg.value <= individualCap);
+
+    contributions[msg.sender].weiContributed = contributions[msg.sender].weiContributed.add(msg.value);
+
+    if ((contributors.length == 0) || (contributors[0] != msg.sender)) {
         contributors.push(msg.sender);
     }
     weiRaised = weiRaised.add(msg.value);
-    require(weiRaised <= totalCap);
-    // calculate token amount to be created
-    // Reserve LST for beneficiary
-    uint256 tokens = msg.value.mul(rate);
-    reservedTokens[msg.sender] = reservedTokens[msg.sender].add(tokens);
-    forwardFunds();
+
+    fundsWallet.transfer(msg.value);
+  }
+
+  function contributeAndVest() public whilePublicTGEIsActive payable {
+    bool _vestingDecision = true;
+    contribute(_vestingDecision)
+  }
+
+  function contributeWithoutVesting() public whilePublicTGEIsActive payable {
+    bool _vestingDecision = false;
+    contribute(_vestingDecision)
   }
 
   // Vesting logic
   // The following cases are checked for _beneficiary's actions:
-  // 1. Had chosen not to vest previously, and chooses not to vest now
-  // 2. Had chosen not to vest previously, and chooses to vest now
-  // 3. Had chosen to vest previously, and chooses not to vest now
-  // 4. Had chosen to vest previously, and chooses to vest now
-  // 2 & 3 are valid cases
-  // 1 and 4 are invalid because they are double-vesting actions
   function vest(bool _vestingDecision) external returns(bool) {
-    bool existingDecision = hasVested[msg.sender];
-    // Prevent double vesting
-    if (existingDecision) {
-      require(!_vestingDecision);
-    }
-    if (!existingDecision) {
-      require(_vestingDecision);
-    }
+    bool existingDecision = contributions[msg.sender].hasVested;
+    require(existingDecision != _vestingDecision)
     // Ensure vesting cannot be done once TRS starts
     if (block.timestamp > publicTGEEndBlockTimeStamp) {
       require(block.timestamp.sub(publicTGEEndBlockTimeStamp) <= TRSOffset);
     }
-    hasVested[msg.sender] = _vestingDecision;
+    contributions[msg.sender].hasVested = _vestingDecision;
     return true;
-  }
-
-  function getTotalContributors() external view returns(uint256) {
-      return contributors.length;
   }
 
 }
