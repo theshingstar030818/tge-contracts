@@ -284,11 +284,12 @@ contract SimpleTGE is Ownable {
     require(weiRaised  + msg.value <= totalCapInWei);
     require(contributions[msg.sender].weiContributed  + msg.value <= individualCapInWei);
 
-    contributions[msg.sender].weiContributed = contributions[msg.sender].weiContributed.add(msg.value);
 
     if ((contributors.length == 0) || (contributors[0] != msg.sender)) {
         contributors.push(msg.sender);
     }
+
+    contributions[msg.sender].weiContributed = contributions[msg.sender].weiContributed.add(msg.value);
 
     weiRaised = weiRaised.add(msg.value);
     contributions[msg.sender].hasVested = _vestingDecision;
