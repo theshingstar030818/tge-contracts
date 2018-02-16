@@ -4,6 +4,7 @@ import "./dependencies/MintableToken.sol";
 import "./dependencies/PausableToken.sol";
 import "./dependencies/SafeMath.sol";
 import "./dependencies/Ownable.sol";
+import "./dependencies/TokenVesting.sol";
 
 contract LendroidSupportToken is MintableToken, PausableToken {
 
