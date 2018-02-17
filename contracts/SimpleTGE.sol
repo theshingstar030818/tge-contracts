@@ -1,4 +1,5 @@
 pragma solidity ^0.4.17;
+
 /**
  * @title SafeMath
  * @dev Math operations with safety checks that throw on error
@@ -103,7 +104,6 @@ contract SimpleTGE is Ownable {
 
   modifier whilePublicTGEIsActive() {
     require(block.timestamp >= publicTGEStartBlockTimeStamp && block.timestamp <= publicTGEEndBlockTimeStamp);
-
     _;
   }
 
@@ -114,7 +114,7 @@ contract SimpleTGE is Ownable {
 
   function blacklistAddresses(address[] addrs) external onlyOwner returns(bool) {
     require(addrs.length <= 100);
-    for (uint i=0; i<addrs.length; i++) {
+    for (uint i = 0; i < addrs.length; i++) {
       require(addrs[i] != address(0));
       whitelist[addrs[i]] = false;
     }
@@ -123,7 +123,7 @@ contract SimpleTGE is Ownable {
 
   function whitelistAddresses(address[] addrs) external onlyOwner returns(bool) {
     require(addrs.length <= 100);
-    for (uint i=0; i<addrs.length; i++) {
+    for (uint i = 0; i < addrs.length; i++) {
       require(addrs[i] != address(0));
       whitelist[addrs[i]] = true;
     }
@@ -137,11 +137,19 @@ contract SimpleTGE is Ownable {
     _beneficiary.transfer(this.balance);
   }
 
-  function SimpleTGE (address _fundsWallet,uint256 _publicTGEStartBlockTimeStamp,uint256 _publicTGEEndBlockTimeStamp,uint256 _individualCapInWei,uint256 _totalCapInWei) {
+  function SimpleTGE (
+    address _fundsWallet,
+    uint256 _publicTGEStartBlockTimeStamp,
+    uint256 _publicTGEEndBlockTimeStamp,
+    uint256 _individualCapInWei,
+    uint256 _totalCapInWei
+  ) public 
+  {
     require(_publicTGEStartBlockTimeStamp >= block.timestamp);
-    require(_publicTGEEndBlockTimeStamp >= _publicTGEStartBlockTimeStamp);
+    require(_publicTGEEndBlockTimeStamp > _publicTGEStartBlockTimeStamp);
     require(_fundsWallet != address(0));
     require(_individualCapInWei > 0);
+    require(_individualCapInWei <= _totalCapInWei);
     require(_totalCapInWei > 0);
 
     fundsWallet = _fundsWallet;
@@ -152,21 +160,22 @@ contract SimpleTGE is Ownable {
   }
 
   // allows changing the individual cap.
-  function changeindividualCapInWei(uint256 _individualCapInWei) onlyOwner external returns(bool) {
+  function changeIndividualCapInWei(uint256 _individualCapInWei) onlyOwner external returns(bool) {
       require(_individualCapInWei > 0);
+      require(_individualCapInWei < totalCapInWei);
       individualCapInWei = _individualCapInWei;
       return true;
   }
 
   // low level token purchase function
-  function contribute(bool _vestingDecision) internal{
-    //validations
+  function contribute(bool _vestingDecision) internal {
+    // validations
     require(msg.sender != address(0));
     require(msg.value != 0);
-    require(weiRaised  + msg.value <= totalCapInWei);
-    require(contributions[msg.sender].weiContributed  + msg.value <= individualCapInWei);
+    require(weiRaised.add(msg.value) <= totalCapInWei);
+    require(contributions[msg.sender].weiContributed.add(msg.value) <= individualCapInWei);
     // if we have not received any WEI from this address until now, then we add this address to contributors list.
-    if (contributions[msg.sender].weiContributed == 0){
+    if (contributions[msg.sender].weiContributed == 0) {
       contributors.push(msg.sender);
     }
     contributions[msg.sender].weiContributed = contributions[msg.sender].weiContributed.add(msg.value);
