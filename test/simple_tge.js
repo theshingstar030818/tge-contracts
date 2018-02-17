@@ -102,61 +102,61 @@ contract("SimpleTGE", function(accounts) {
     it("should not deploy the contract if the start time is less than the current block's timestamp", async function() {
       const startTime = blockTimeStamp()-duration.hours(1);
       const endTime = startTime + 300;
-      this.contract = await SimpleTGE.new(fundsWallet, startTime, endTime, individualCapInWei, totalCapInWei).should.be.rejectedWith('invalid opcode');
+      this.contract = await SimpleTGE.new(fundsWallet, startTime, endTime, individualCapInWei, totalCapInWei).should.be.rejectedWith('revert');
     });
 
     it("should not deploy the contract if the end time is less than or equal to the start time", async function() {
       const startTime = blockTimeStamp()+duration.hours(1);
       let endTime = startTime;
-      this.contract = await SimpleTGE.new(fundsWallet, startTime, endTime, individualCapInWei, totalCapInWei).should.be.rejectedWith('invalid opcode');
+      this.contract = await SimpleTGE.new(fundsWallet, startTime, endTime, individualCapInWei, totalCapInWei).should.be.rejectedWith('revert');
 
       endTime = startTime-10000;
-      this.contract = await SimpleTGE.new(fundsWallet, startTime, endTime, individualCapInWei, totalCapInWei).should.be.rejectedWith('invalid opcode');
+      this.contract = await SimpleTGE.new(fundsWallet, startTime, endTime, individualCapInWei, totalCapInWei).should.be.rejectedWith('revert');
     });
 
     it("should not deploy the contract if the fundsWallet is not a valid address", async function() {
       const startTime = blockTimeStamp()+duration.hours(1);
       const endTime = startTime + 300;
-      this.contract = await SimpleTGE.new(0, startTime, endTime, individualCapInWei, totalCapInWei).should.be.rejectedWith('invalid opcode');
+      this.contract = await SimpleTGE.new(0, startTime, endTime, individualCapInWei, totalCapInWei).should.be.rejectedWith('revert');
     });
 
     it("should not deploy the contract if the individualCapInWei is not greater than zero", async function() {
       const startTime = blockTimeStamp()+duration.hours(1);
       const endTime = startTime + 300;
-      this.contract = await SimpleTGE.new(fundsWallet, startTime, endTime, 0, totalCapInWei).should.be.rejectedWith('invalid opcode');
+      this.contract = await SimpleTGE.new(fundsWallet, startTime, endTime, 0, totalCapInWei).should.be.rejectedWith('revert');
     });
 
     it("should not deploy the contract if the totalCapInWei is not greater than zero", async function() {
       const startTime = blockTimeStamp()+duration.hours(1);
       const endTime = startTime + 300;
-      this.contract = await SimpleTGE.new(fundsWallet, startTime, endTime, individualCapInWei, 0).should.be.rejectedWith('invalid opcode');
+      this.contract = await SimpleTGE.new(fundsWallet, startTime, endTime, individualCapInWei, 0).should.be.rejectedWith('revert');
     });
 
-  it("should have an owner", async function() {
-    assert.equal(await this.contract.owner(), accounts[0]);
-  });
+    it("should have an owner", async function() {
+      assert.equal(await this.contract.owner(), accounts[0]);
+    });
 
-  // TODO would it be easier to reset the balances for each account after each it?
-  // We may already be doing this having trouble actually running the tests
-  it("should create the contract with the correct properties", async function() {
-    assert.equal(await this.contract.fundsWallet(), fundsWallet);
-    assert.equal(await this.contract.publicTGEStartBlockTimeStamp(), mostRecentStartTime);
-    // assert.isAtLeast(await this.contract.publicTGEStartBlockTimeStamp(), blockTimeStamp());
-    assert.equal(await this.contract.publicTGEEndBlockTimeStamp(), mostRecentEndTime);
-    // assert.isAtLeast(await this.contract.publicTGEEndBlockTimeStamp(), await this.contract.publicTGEStartBlockTimeStamp());
-    assert.equal(await this.contract.individualCapInWei(), individualCapInWei);
-    assert.isAbove(await this.contract.individualCapInWei(), 0);
-    assert.equal(await this.contract.totalCapInWei(), totalCapInWei);
-    assert.isAbove(await this.contract.totalCapInWei(), 0);
-    assert.equal(await this.contract.owner(), accounts[0]);
-  });
+    // TODO would it be easier to reset the balances for each account after each it?
+    // We may already be doing this having trouble actually running the tests
+    it("should create the contract with the correct properties", async function() {
+      assert.equal(await this.contract.fundsWallet(), fundsWallet);
+      assert.equal(await this.contract.publicTGEStartBlockTimeStamp(), mostRecentStartTime);
+      // assert.isAtLeast(await this.contract.publicTGEStartBlockTimeStamp(), blockTimeStamp());
+      assert.equal(await this.contract.publicTGEEndBlockTimeStamp(), mostRecentEndTime);
+      // assert.isAtLeast(await this.contract.publicTGEEndBlockTimeStamp(), await this.contract.publicTGEStartBlockTimeStamp());
+      assert.equal(await this.contract.individualCapInWei(), individualCapInWei);
+      assert.isAbove(await this.contract.individualCapInWei(), 0);
+      assert.equal(await this.contract.totalCapInWei(), totalCapInWei);
+      assert.isAbove(await this.contract.totalCapInWei(), 0);
+      assert.equal(await this.contract.owner(), accounts[0]);
+    });
 
   it("should allow contributing with vesting and honor whitelist/blacklist", async function() {
     const initialFundsWalletBalance = await web3.eth.getBalance(await this.contract.fundsWallet());
   
     for (var i = 0; i < validWhiteListAddresses.length; i++) {
       const address = validWhiteListAddresses[i];
-      await this.contract.contributeAndVest({value: 0, from: address}).should.be.rejectedWith('invalid opcode');
+      await this.contract.contributeAndVest({value: 0, from: address}).should.be.rejectedWith('revert');
       await this.contract.contributeAndVest({value: 1, from: address});
       assert.equal(await this.contract.contributors(i), address);
 
@@ -173,7 +173,7 @@ contract("SimpleTGE", function(accounts) {
 
     for (var i = 0; i < validUnwhitelistedAddresses.length; i++) {
       const address = validUnwhitelistedAddresses[i];
-      await this.contract.contributeAndVest({value: 1, from: address}).should.be.rejectedWith('invalid opcode');
+      await this.contract.contributeAndVest({value: 1, from: address}).should.be.rejectedWith('revert');
       assert.equal(await this.contract.contributors(i), validWhiteListAddresses[i]);
 
       const contribution = await this.contract.contributions(address);
@@ -189,7 +189,7 @@ contract("SimpleTGE", function(accounts) {
 
     for (var i = 0; i < validBlackListAddresses.length; i++) {
       const address = validBlackListAddresses[i];
-      await this.contract.contributeAndVest({value: 1, from: address}).should.be.rejectedWith('invalid opcode');
+      await this.contract.contributeAndVest({value: 1, from: address}).should.be.rejectedWith('revert');
       assert.equal(await this.contract.contributors(i), validWhiteListAddresses[i]);
 
       const contribution = await this.contract.contributions(address);
@@ -209,7 +209,7 @@ contract("SimpleTGE", function(accounts) {
   
     for (var i = 0; i < validWhiteListAddresses.length; i++) {
       const address = validWhiteListAddresses[i];
-      await this.contract.contributeAndVest({value: 0, from: address}).should.be.rejectedWith('invalid opcode');
+      await this.contract.contributeAndVest({value: 0, from: address}).should.be.rejectedWith('revert');
       await this.contract.contributeWithoutVesting({value: 1, from: address});
       assert.equal(await this.contract.contributors(i), address);
 
@@ -226,7 +226,7 @@ contract("SimpleTGE", function(accounts) {
 
     for (var i = 0; i < validUnwhitelistedAddresses.length; i++) {
       const address = validUnwhitelistedAddresses[i];
-      await this.contract.contributeWithoutVesting({value: 1, from: address}).should.be.rejectedWith('invalid opcode');
+      await this.contract.contributeWithoutVesting({value: 1, from: address}).should.be.rejectedWith('revert');
       assert.equal(await this.contract.contributors(i), validWhiteListAddresses[i]);
 
       const contribution = await this.contract.contributions(address);
@@ -242,7 +242,7 @@ contract("SimpleTGE", function(accounts) {
 
     for (var i = 0; i < validBlackListAddresses.length; i++) {
       const address = validBlackListAddresses[i];
-      await this.contract.contributeWithoutVesting({value: 1, from: address}).should.be.rejectedWith('invalid opcode');
+      await this.contract.contributeWithoutVesting({value: 1, from: address}).should.be.rejectedWith('revert');
       assert.equal(await this.contract.contributors(i), validWhiteListAddresses[i]);
 
       const contribution = await this.contract.contributions(address);
@@ -265,7 +265,7 @@ contract("SimpleTGE", function(accounts) {
     await this.contract.whitelistAddresses(validWhiteListAddresses);
 
     // Before TGE, should be rejected
-    await this.contract.contributeAndVest({value: 1, from: validWhiteListAddresses[0]}).should.be.rejectedWith('invalid opcode');
+    await this.contract.contributeAndVest({value: 1, from: validWhiteListAddresses[0]}).should.be.rejectedWith('revert');
     await increaseTime(duration.days(100));
     await advanceBlock();
 
@@ -275,7 +275,7 @@ contract("SimpleTGE", function(accounts) {
     // After TGE, should be rejected
     await increaseTime(301);
     await advanceBlock();
-    await this.contract.contributeAndVest({value: 1, from: validWhiteListAddresses[0]}).should.be.rejectedWith('invalid opcode');
+    await this.contract.contributeAndVest({value: 1, from: validWhiteListAddresses[0]}).should.be.rejectedWith('revert');
   });
 
   it("should handle duplicate contributions correctly", async function() {
@@ -315,7 +315,7 @@ contract("SimpleTGE", function(accounts) {
     assert.equal(contribution[1], individualCapInWei);
     assert.equal(await this.contract.weiRaised(), individualCapInWei);
 
-    await this.contract.contributeAndVest({value: 1, from: contributor}).should.be.rejectedWith('invalid opcode');
+    await this.contract.contributeAndVest({value: 1, from: contributor}).should.be.rejectedWith('revert');
     contribution = await this.contract.contributions(contributor);
     assert.equal(contribution[0], true);
     assert.equal(contribution[1], individualCapInWei);
@@ -325,7 +325,7 @@ contract("SimpleTGE", function(accounts) {
   it("should not allow an individual who has never contributed to exceed the individualCapInWei", async function () {
     const contributor = validWhiteListAddresses[0];
     
-    await this.contract.contributeAndVest({value: individualCapInWei+1, from: contributor}).should.be.rejectedWith('invalid opcode');
+    await this.contract.contributeAndVest({value: individualCapInWei+1, from: contributor}).should.be.rejectedWith('revert');
     await this.contract.contributors(0).should.be.rejectedWith('invalid opcode');
     contribution = await this.contract.contributions(contributor);
     assert.equal(contribution[0], false);
@@ -342,7 +342,7 @@ contract("SimpleTGE", function(accounts) {
     assert.equal(contribution[1], individualCapInWei);
     assert.equal(await this.contract.weiRaised(), individualCapInWei);
 
-    await this.contract.contributeAndVest({value: individualCapInWei, from: validWhiteListAddresses[1]}).should.be.rejectedWith('invalid opcode');
+    await this.contract.contributeAndVest({value: individualCapInWei, from: validWhiteListAddresses[1]}).should.be.rejectedWith('revert');
     contribution = await this.contract.contributions(validWhiteListAddresses[1]);
     assert.equal(contribution[0], false);
     assert.equal(contribution[1], 0);
@@ -357,14 +357,14 @@ contract("SimpleTGE", function(accounts) {
     await this.contract.changeIndividualCapInWei(totalCapInWei-1, {from: accounts[0]});
     assert.equal(await this.contract.individualCapInWei(), totalCapInWei-1);
 
-    await this.contract.changeIndividualCapInWei(totalCapInWei-2, {from: accounts[3]}).should.be.rejectedWith('invalid opcode');
+    await this.contract.changeIndividualCapInWei(totalCapInWei-2, {from: accounts[3]}).should.be.rejectedWith('revert');
     assert.equal(await this.contract.individualCapInWei(), totalCapInWei-1);
   });
 
   it("should not allow the individualCapInWei to exceed the totalCapInWei", async function() {
     assert.equal(await this.contract.owner(), accounts[0]);
   
-    await this.contract.changeIndividualCapInWei(totalCapInWei+1, {from: accounts[0]}).should.be.rejectedWith('invalid opcode');
+    await this.contract.changeIndividualCapInWei(totalCapInWei+1, {from: accounts[0]}).should.be.rejectedWith('revert');
     assert.equal(await this.contract.individualCapInWei(), individualCapInWei);
   });
 
@@ -394,7 +394,7 @@ contract("SimpleTGE", function(accounts) {
     assert.equal(await web3.eth.getBalance(accounts[2]).String, existingOwnerBalance.add(existingContractBalance).String);
     assert.equal(await web3.eth.getBalance(this.contract.address), 0);
 
-    await this.contract.reclaimEther(accounts[3], {from: accounts[3]}).should.be.rejectedWith('invalid opcode');
+    await this.contract.reclaimEther(accounts[3], {from: accounts[3]}).should.be.rejectedWith('revert');
   });
 
   it("should allow contributors to change their initial vesting decision", async function() {
@@ -410,17 +410,17 @@ contract("SimpleTGE", function(accounts) {
     assert.equal(contribution[1], 1);
 
     // It shouldn't succeed if its already at the value they're trying to set it to
-    await this.contract.vest(false, {from: contributor}).should.be.rejectedWith('invalid opcode');
+    await this.contract.vest(false, {from: contributor}).should.be.rejectedWith('revert');
   });
 
   it("should not allow contributors to change their initial vesting decision if they're not whitelisted", async function() {
     let contributor = validUnwhitelistedAddresses[0];
-    await this.contract.contributeAndVest({value: 1, from: contributor}).should.be.rejectedWith('invalid opcode');
+    await this.contract.contributeAndVest({value: 1, from: contributor}).should.be.rejectedWith('revert');
   });
 
   it("should not allow contributors to change their initial vesting decision if they're blacklisted", async function() {
     let contributor = validBlackListAddresses[0];
-    await this.contract.contributeAndVest({value: 1, from: contributor}).should.be.rejectedWith('invalid opcode');
+    await this.contract.contributeAndVest({value: 1, from: contributor}).should.be.rejectedWith('revert');
   });
 
   it("should not allow contributors to change their vesting decision if they have not contributed yet", async function() {
@@ -430,8 +430,8 @@ contract("SimpleTGE", function(accounts) {
     assert.equal(contribution[0], false);
     assert.equal(contribution[1], 0);
 
-    await this.contract.vest(false, {from: contributor}).should.be.rejectedWith('invalid opcode');
-    await this.contract.vest(true, {from: contributor}).should.be.rejectedWith('invalid opcode');
+    await this.contract.vest(false, {from: contributor}).should.be.rejectedWith('revert');
+    await this.contract.vest(true, {from: contributor}).should.be.rejectedWith('revert');
   });
 
   it("should not allow contributors to change their vesting decision before the TGE has started", async function() {
@@ -443,7 +443,7 @@ contract("SimpleTGE", function(accounts) {
 
 
     let contributor = validWhiteListAddresses[0];
-    await this.contract.contributeAndVest({value: 1, from: contributor}).should.be.rejectedWith('invalid opcode');
+    await this.contract.contributeAndVest({value: 1, from: contributor}).should.be.rejectedWith('revert');
   });
 
   it("should not allow contributors to change their initial vesting decision once TRS has started", async function() {
@@ -465,7 +465,7 @@ contract("SimpleTGE", function(accounts) {
     // Make sure they cannot contribute after TRS has started (one additional hour since we were already one hour before)
     await increaseTime(duration.hours(1)+duration.seconds(1));
     await advanceBlock();
-    await this.contract.vest(true, {from: contributor}).should.be.rejectedWith('invalid opcode');
+    await this.contract.vest(true, {from: contributor}).should.be.rejectedWith('revert');
     contribution = await this.contract.contributions(contributor);
     assert.equal(contribution[0], false);
     assert.equal(contribution[1], 1);
