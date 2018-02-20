@@ -92,7 +92,7 @@ contract simpleLSTDistribution is Ownable {
 
       require(token.transfer(msg.sender, _withdrawNow));
       LSTsWithdrawn(beneficiary, _withdrawNow);
-      require(token.transfer(vesting[msg.sender], _vestedPortion));
+      require(token.transfer(address(vesting[msg.sender]), _vestedPortion));
       timeVestingLSTsWithdrawn(msg.sender, _vestedPortion, vestingStartTime, vestingStartTime, vestingDuration);
 
     }
