@@ -1,38 +1,5 @@
 pragma solidity ^0.4.17;
 /**
- * @title SafeMath
- * @dev Math operations with safety checks that throw on error
- */
-library SafeMath {
-  function mul(uint256 a, uint256 b) internal pure returns (uint256) {
-    if (a == 0) {
-      return 0;
-    }
-    uint256 c = a * b;
-    assert(c / a == b);
-    return c;
-  }
-
-  function div(uint256 a, uint256 b) internal pure returns (uint256) {
-    // assert(b > 0); // Solidity automatically throws when dividing by 0
-    uint256 c = a / b;
-    // assert(a == b * c + a % b); // There is no case in which this doesn't hold
-    return c;
-  }
-
-  function sub(uint256 a, uint256 b) internal pure returns (uint256) {
-    assert(b <= a);
-    return a - b;
-  }
-
-  function add(uint256 a, uint256 b) internal pure returns (uint256) {
-    uint256 c = a + b;
-    assert(c >= a);
-    return c;
-  }
-}
-
-/**
  * @title Ownable
  * @dev The Ownable contract has an owner address, and provides basic authorization control
  * functions, this simplifies the implementation of "user permissions".
@@ -67,22 +34,28 @@ contract Ownable {
   }
 
 }
-
+/**
+ * @title SimpleVestingSubscription
+ * @dev The SimpleVestingSubscription contract receives vesting decision from people
+ * who have contributed non-ETH to the TGE. The allocations are received seperately
+ * this contracts verifies two things:
+ * that the  contributor have control of their address
+ * the contributors vesting preference recorded.
+**/
 contract SimpleVestingSubscription is Ownable {
-  using SafeMath for uint256;
 
-  // start and end timestamps (both inclusive) when sale is open
-  uint256 public publicTGEStartBlockTimeStamp;
+  // start and end timestamps (both inclusive) when TRS subscription is open
+  uint256 public TRSSubscriptionStartBlockTimeStamp;
 
-  uint256 public publicTGEEndBlockTimeStamp;
+  uint256 public TRSSubscriptionEndBlockTimeStamp;
 
-  // how long the TRS subscription is open after the TGE.
-  uint256 public TRSOffset = 5 days;
 
   address[] public contributors;
   struct Contribution {
     bool hasVested;
+    bool verified;
   }
+
   mapping (address => Contribution)  public contributions;
 
   /**
@@ -92,24 +65,35 @@ contract SimpleVestingSubscription is Ownable {
     _beneficiary.transfer(this.balance);
   }
 
-  function SimpleVestingSubscription (uint256 _publicTGEStartBlockTimeStamp,uint256 _publicTGEEndBlockTimeStamp) {
-    require(_publicTGEStartBlockTimeStamp >= block.timestamp);
-    require(_publicTGEEndBlockTimeStamp >= _publicTGEStartBlockTimeStamp);
-    publicTGEStartBlockTimeStamp = _publicTGEStartBlockTimeStamp;
-    publicTGEEndBlockTimeStamp = _publicTGEEndBlockTimeStamp;
+  function getContributorsCount() public constant returns(uint count) {
+    return contributors.length;
   }
 
-  // Vesting logic
-  // The following cases are checked for _beneficiary's actions:
-  function vest(bool _vestingDecision) external returns(bool) {
-    bool existingDecision = contributions[msg.sender].hasVested;
-    require(existingDecision != _vestingDecision);
-    require(block.timestamp >= publicTGEStartBlockTimeStamp);
-    // Ensure vesting cannot be done once TRS starts
-    if (block.timestamp > publicTGEEndBlockTimeStamp) {
-      require(block.timestamp.sub(publicTGEEndBlockTimeStamp) <= TRSOffset);
+  function SimpleVestingSubscription (uint256 _TRSSubscriptionStartBlockTimeStamp,uint256 _TRSSubscriptionEndBlockTimeStamp) {
+    require(_TRSSubscriptionStartBlockTimeStamp >= block.timestamp);
+    require(_TRSSubscriptionEndBlockTimeStamp >= _TRSSubscriptionStartBlockTimeStamp);
+    TRSSubscriptionStartBlockTimeStamp = _TRSSubscriptionStartBlockTimeStamp;
+    TRSSubscriptionEndBlockTimeStamp = _TRSSubscriptionEndBlockTimeStamp;
+  }
+
+  function vestOrNot(bool _vestingDecision) internal {
+    require(block.timestamp >= TRSSubscriptionStartBlockTimeStamp);
+    require(block.timestamp <= TRSSubscriptionEndBlockTimeStamp);
+    if (!contributions[msg.sender].verified){
+      contributors.push(msg.sender);
     }
     contributions[msg.sender].hasVested = _vestingDecision;
+    contributions[msg.sender].verified = true;
+
+  }
+
+  function optInToVesting() external returns(bool) {
+    vestOrNot(true);
+    return true;
+  }
+
+  function optOutOfVesting() external returns(bool) {
+    vestOrNot(false);
     return true;
   }
 }
