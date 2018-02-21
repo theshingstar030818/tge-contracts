@@ -109,4 +109,12 @@ contract SimpleLSTDistribution is Ownable {
     }
   }
 
+  // member function that can be called to release vested tokens periodically
+  function releaseVestedTokens(address beneficiary) public {
+    require(beneficiary != 0x0);
+
+    TokenVesting tokenVesting = vesting[beneficiary];
+    tokenVesting.release(token);
+  }
+
 }
