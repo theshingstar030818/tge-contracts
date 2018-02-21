@@ -1,7 +1,7 @@
 pragma solidity ^0.4.18;
 
-import "./dependencies/MintableToken.sol";
-import "./dependencies/PausableToken.sol";
+import "./dependencies/token/ERC20/MintableToken.sol";
+import "./dependencies/token/ERC20/PausableToken.sol";
 
 
 contract LendroidSupportToken is MintableToken, PausableToken {
@@ -17,6 +17,6 @@ contract LendroidSupportToken is MintableToken, PausableToken {
    */
   function LendroidSupportToken() public {
     paused = true;
-    totalSupply = MAX_SUPPLY;
+    totalSupply_ = MAX_SUPPLY;
   }
 }

@@ -1,19 +1,17 @@
 pragma solidity ^0.4.18;
 
-import "./dependencies/MintableToken.sol";
-import "./dependencies/PausableToken.sol";
-import "./dependencies/SafeMath.sol";
-import "./dependencies/Ownable.sol";
-import "./dependencies/TokenVesting.sol";
+import "./dependencies/math/SafeMath.sol";
+import "./dependencies/ownership/Ownable.sol";
+import "./dependencies/token/ERC20/TokenVesting.sol";
 import "./SimpleTGE.sol";
 import "./SimplePreTGE.sol";
 import "./LendroidSupportToken.sol";
 
 /**
- * @title simpleLSTDistribution
- * @dev simpleLSTDistribution contract provides interface for the contributor to withdraw their allocations / initiate the vesting contract
+ * @title SimpleLSTDistribution
+ * @dev SimpleLSTDistribution contract provides interface for the contributor to withdraw their allocations / initiate the vesting contract
  */
-contract simpleLSTDistribution is Ownable {
+contract SimpleLSTDistribution is Ownable {
   using SafeMath for uint256;
 
   SimplePreTGE public SimplePreTGEContract;
@@ -25,16 +23,15 @@ contract simpleLSTDistribution is Ownable {
   uint256 vestingBonusMultiplier;
   uint256 vestingDuration;
   uint256 vestingStartTime;
-  LendroidSupportToken public token;
 
   struct allocation {
-    bool hasVested;
+    bool shouldVest;
     uint256 weiContributed;
     uint256 LSTAllocated;
     bool hasWithdrawn;
   }
   // maps all allocations claimed by contributors
-  mapping (address => bool)  public allocations;
+  mapping (address => allocation)  public allocations;
 
   // map of address to token vesting contract
   mapping (address => TokenVesting) public vesting;
@@ -44,7 +41,7 @@ contract simpleLSTDistribution is Ownable {
    * @param beneficiary who is receiving the tokens
    * @param tokens amount of tokens given to the beneficiary
    */
-  event LSTsWithdrawn(address beneficiary, uint256 tokens);
+  event LogLSTsWithdrawn(address beneficiary, uint256 tokens);
 
   /**
    * event for time vested token transfer logging
@@ -54,57 +51,62 @@ contract simpleLSTDistribution is Ownable {
    * @param cliff duration in seconds after start time at which vesting will start
    * @param duration total duration in seconds in which the tokens will be vested
    */
-  event timeVestingLSTsWithdrawn(address beneficiary, uint256 tokens, uint256 start, uint256 cliff, uint256 duration);
+  event LogTimeVestingLSTsWithdrawn(address beneficiary, uint256 tokens, uint256 start, uint256 cliff, uint256 duration);
 
-
-  function withdraw(){
-    require(!allocations[msg.sender].hasWithdrawn)
-    // should have participated in the TGE or the pre-TGE
-    require(SimpleTGEContract.contributions[msg.sender].weiContributed.add(SimplePreTGEContract.contributions[msg.sender].weiContributed) > 0);
-    // make sure simpleTGE is over and the TRS subscription has ended
-    require(block.timestamp > SimpleTGEContract.publicTGEEndBlockTimeStamp.add(SimpleTGEContract.TRSOffset));
-    // allocations should be locked in the pre-TGE
-    require(SimplePreTGEContract.allocationsLocked);
-
-    // the same contributor could have contributed in the pre-tge and the tge, so we add the contributions.
-    uint256 _totalWeiContribution = SimpleTGEContract.contributions[msg.sender].weiContributed.add(SimplePreTGEContract.contributions[msg.sender].weiContributed);
-    // if the vesting decision is "yes" in any of the contracts, the contributor is vested.
-    bool _vestingDecision = SimpleTGEContract.contributions[msg.sender].weiContributed || SimplePreTGEContract.contributions[msg.sender].weiContributed;
-
-    allocations[msg.sender].hasWithdrawn = true;
-    allocations[msg.sender].hasVested = _vestingDecision;
-    allocations[msg.sender].weiContributed = _totalWeiContribution;
-
-    if (!_vestingDecision){
-      uint256 _lstAllocated = LSTRatePerETH.mul(_totalWeiContribution).mul(vestingBonusMultiplier);
-      allocations[msg.sender].LSTAllocated = _lstAllocated;
-      require(token.transfer(msg.sender, tokens));
-      LSTsWithdrawn(beneficiary, tokens);
-    }
-    else{
-      uint256 _lstAllocated = LSTRatePerETH.mul(_totalWeiContribution);
-      allocations[msg.sender].LSTAllocated = _lstAllocated;
-
-      uint256 _withdrawNow = _lstAllocated.div(10);
-      uint256 _vestedPortion = _lstAllocated.sub(_withdrawNow);
-
-      vesting[msg.sender] = new TokenVesting(msg.sender, vestingStartTime, vestingStartTime, vestingDuration, false);
-
-      require(token.transfer(msg.sender, _withdrawNow));
-      LSTsWithdrawn(beneficiary, _withdrawNow);
-      require(token.transfer(address(vesting[msg.sender]), _vestedPortion));
-      timeVestingLSTsWithdrawn(msg.sender, _vestedPortion, vestingStartTime, vestingStartTime, vestingDuration);
-
-    }
-  }
-
-  function simpleLSTDistribution(_SimplePreTGEContract,_SimpleTGE, _LSTTokenAddress,_vestingDuration,_vestingStartTime) public {
-    SimplePreTGEContract = _SimplePreTGEContract;
-    SimpleTGE = _SimpleTGE;
-    token = _LSTTokenAddress
+  function SimpleLSTDistribution(
+      address _SimplePreTGEAddress,
+      address _SimpleTGEAddress,
+      address _LSTTokenAddress,
+      uint256 _vestingBonusMultiplier,
+      uint256 _vestingDuration,
+      uint256 _vestingStartTime
+    ) public {
+    SimplePreTGEContract = SimplePreTGE(_SimplePreTGEAddress);
+    SimpleTGEContract = SimpleTGE(_SimpleTGEAddress);
+    token = LendroidSupportToken(_LSTTokenAddress);
     vestingBonusMultiplier = _vestingBonusMultiplier;
     vestingDuration = _vestingDuration;
     vestingStartTime = _vestingStartTime;
+  }
+
+  function withdraw() external {
+    require(!allocations[msg.sender].hasWithdrawn);
+    // make sure simpleTGE is over and the TRS subscription has ended
+    require(block.timestamp > SimpleTGEContract.publicTGEEndBlockTimeStamp().add(SimpleTGEContract.TRSOffset()));
+    // allocations should be locked in the pre-TGE
+    require(SimplePreTGEContract.allocationsLocked());
+    // should have participated in the TGE or the pre-TGE
+    bool _preTGEHasVested;
+    uint256 _preTGEWeiContributed;
+    bool _publicTGEHasVested;
+    uint256 _publicTGEWeiContributed;
+    (_publicTGEHasVested, _publicTGEWeiContributed) = SimpleTGEContract.contributions(msg.sender);
+    (_preTGEHasVested, _preTGEWeiContributed) = SimplePreTGEContract.contributions(msg.sender);
+    uint256 _totalWeiContribution = _preTGEWeiContributed.add(_publicTGEWeiContributed);
+    require(_totalWeiContribution > 0);
+    // the same contributor could have contributed in the pre-tge and the tge, so we add the contributions.
+    bool _shouldVest = _preTGEHasVested || _publicTGEHasVested;
+    allocations[msg.sender].hasWithdrawn = true;
+    allocations[msg.sender].shouldVest = _shouldVest;
+    allocations[msg.sender].weiContributed = _totalWeiContribution;
+    uint256 _lstAllocated;
+    if (!_shouldVest) {
+      _lstAllocated = LSTRatePerWEI.mul(_totalWeiContribution);
+      allocations[msg.sender].LSTAllocated = _lstAllocated;
+      require(token.mint(msg.sender, _lstAllocated));
+      LogLSTsWithdrawn(msg.sender, _lstAllocated);
+    }
+    else {
+      _lstAllocated = LSTRatePerWEI.mul(_totalWeiContribution).mul(vestingBonusMultiplier);
+      allocations[msg.sender].LSTAllocated = _lstAllocated;
+      uint256 _withdrawNow = _lstAllocated.div(10);
+      uint256 _vestedPortion = _lstAllocated.sub(_withdrawNow);
+      vesting[msg.sender] = new TokenVesting(msg.sender, vestingStartTime, vestingStartTime, vestingDuration, false);
+      require(token.mint(msg.sender, _withdrawNow));
+      LogLSTsWithdrawn(msg.sender, _withdrawNow);
+      require(token.mint(address(vesting[msg.sender]), _vestedPortion));
+      LogTimeVestingLSTsWithdrawn(msg.sender, _vestedPortion, vestingStartTime, vestingStartTime, vestingDuration);
+    }
   }
 
 }

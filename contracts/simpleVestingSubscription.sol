@@ -69,7 +69,7 @@ contract SimpleVestingSubscription is Ownable {
     return contributors.length;
   }
 
-  function SimpleVestingSubscription (uint256 _TRSSubscriptionStartBlockTimeStamp,uint256 _TRSSubscriptionEndBlockTimeStamp) {
+  function SimpleVestingSubscription(uint256 _TRSSubscriptionStartBlockTimeStamp,uint256 _TRSSubscriptionEndBlockTimeStamp) public {
     require(_TRSSubscriptionStartBlockTimeStamp >= block.timestamp);
     require(_TRSSubscriptionEndBlockTimeStamp >= _TRSSubscriptionStartBlockTimeStamp);
     TRSSubscriptionStartBlockTimeStamp = _TRSSubscriptionStartBlockTimeStamp;
