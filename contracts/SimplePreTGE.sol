@@ -1,6 +1,6 @@
 pragma solidity ^0.4.17;
 
-import "./dependencies/ownership/Ownable.sol";
+import "zeppelin-solidity/contracts/ownership/Ownable.sol";
 
 contract SimplePreTGE is Ownable {
 

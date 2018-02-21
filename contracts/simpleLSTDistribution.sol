@@ -1,8 +1,8 @@
 pragma solidity ^0.4.18;
 
-import "./dependencies/math/SafeMath.sol";
-import "./dependencies/ownership/Ownable.sol";
-import "./dependencies/token/ERC20/TokenVesting.sol";
+import "zeppelin-solidity/contracts/math/SafeMath.sol";
+import "zeppelin-solidity/contracts/ownership/Ownable.sol";
+import "zeppelin-solidity/contracts/token/ERC20/TokenVesting.sol";
 import "./SimpleTGE.sol";
 import "./SimplePreTGE.sol";
 import "./LendroidSupportToken.sol";

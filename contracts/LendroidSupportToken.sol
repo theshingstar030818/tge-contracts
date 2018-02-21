@@ -1,7 +1,7 @@
 pragma solidity ^0.4.18;
 
-import "./dependencies/token/ERC20/MintableToken.sol";
-import "./dependencies/token/ERC20/PausableToken.sol";
+import "zeppelin-solidity/contracts/token/ERC20/MintableToken.sol";
+import "zeppelin-solidity/contracts/token/ERC20/PausableToken.sol";
 
 
 contract LendroidSupportToken is MintableToken, PausableToken {
