@@ -65,4 +65,6 @@ contract SimpleVestingSubscription is Ownable {
     vestOrNot(false);
     return true;
   }
+
+
 }

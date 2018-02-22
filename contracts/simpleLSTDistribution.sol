@@ -21,6 +21,7 @@ contract SimpleLSTDistribution is Ownable {
   //vesting related params
   // bonus multiplied to every vesting contributor's allocation
   uint256 vestingBonusMultiplier;
+  uint256 vestingBonusMultiplierPrecision = 1000000;
   uint256 vestingDuration;
   uint256 vestingStartTime;
 
@@ -61,6 +62,16 @@ contract SimpleLSTDistribution is Ownable {
       uint256 _vestingDuration,
       uint256 _vestingStartTime
     ) public {
+
+    require(_SimplePreTGEAddress != address(0));
+    require(_SimpleTGEAddress != address(0));
+    require(_LSTTokenAddress != address(0));
+    require(_vestingBonusMultiplier >= 1000000);
+    require(_vestingBonusMultiplier <= 10000000);
+    require(_vestingDuration > 0);
+    require(_vestingStartTime > block.timestamp);
+
+
     SimplePreTGEContract = SimplePreTGE(_SimplePreTGEAddress);
     SimpleTGEContract = SimpleTGE(_SimpleTGEAddress);
     token = LendroidSupportToken(_LSTTokenAddress);
@@ -97,7 +108,7 @@ contract SimpleLSTDistribution is Ownable {
       LogLSTsWithdrawn(msg.sender, _lstAllocated);
     }
     else {
-      _lstAllocated = LSTRatePerWEI.mul(_totalWeiContribution).mul(vestingBonusMultiplier);
+      _lstAllocated = LSTRatePerWEI.mul(_totalWeiContribution).mul(vestingBonusMultiplier).div(vestingBonusMultiplierPrecision);
       allocations[msg.sender].LSTAllocated = _lstAllocated;
       uint256 _withdrawNow = _lstAllocated.div(10);
       uint256 _vestedPortion = _lstAllocated.sub(_withdrawNow);
