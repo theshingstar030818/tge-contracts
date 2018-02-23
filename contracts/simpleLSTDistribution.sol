@@ -17,13 +17,13 @@ contract SimpleLSTDistribution is Ownable {
   SimplePreTGE public SimplePreTGEContract;
   SimpleTGE public SimpleTGEContract;
   LendroidSupportToken public token;
-  uint256 LSTRatePerWEI;
+  uint256 public LSTRatePerWEI = 48000;
   //vesting related params
   // bonus multiplied to every vesting contributor's allocation
-  uint256 vestingBonusMultiplier;
-  uint256 vestingBonusMultiplierPrecision = 1000000;
-  uint256 vestingDuration;
-  uint256 vestingStartTime;
+  uint256 public vestingBonusMultiplier;
+  uint256 public vestingBonusMultiplierPrecision = 1000000;
+  uint256 public vestingDuration;
+  uint256 public vestingStartTime;
 
   struct allocation {
     bool shouldVest;
@@ -57,7 +57,6 @@ contract SimpleLSTDistribution is Ownable {
   function SimpleLSTDistribution(
       address _SimplePreTGEAddress,
       address _SimpleTGEAddress,
-      address _LSTTokenAddress,
       uint256 _vestingBonusMultiplier,
       uint256 _vestingDuration,
       uint256 _vestingStartTime
@@ -65,19 +64,27 @@ contract SimpleLSTDistribution is Ownable {
 
     require(_SimplePreTGEAddress != address(0));
     require(_SimpleTGEAddress != address(0));
-    require(_LSTTokenAddress != address(0));
     require(_vestingBonusMultiplier >= 1000000);
     require(_vestingBonusMultiplier <= 10000000);
     require(_vestingDuration > 0);
     require(_vestingStartTime > block.timestamp);
 
+    token = new LendroidSupportToken();
 
     SimplePreTGEContract = SimplePreTGE(_SimplePreTGEAddress);
     SimpleTGEContract = SimpleTGE(_SimpleTGEAddress);
-    token = LendroidSupportToken(_LSTTokenAddress);
     vestingBonusMultiplier = _vestingBonusMultiplier;
     vestingDuration = _vestingDuration;
     vestingStartTime = _vestingStartTime;
+  }
+
+  // member function to mint tokens to a beneficiary
+  function mintTokens(address beneficiary, uint256 tokens) public onlyOwner {
+    require(beneficiary != 0x0);
+    require(tokens > 0);
+
+    require(token.mint(beneficiary, tokens));
+    LogLSTsWithdrawn(beneficiary, tokens);
   }
 
   function withdraw() external {
@@ -112,19 +119,17 @@ contract SimpleLSTDistribution is Ownable {
       allocations[msg.sender].LSTAllocated = _lstAllocated;
       uint256 _withdrawNow = _lstAllocated.div(10);
       uint256 _vestedPortion = _lstAllocated.sub(_withdrawNow);
-      vesting[msg.sender] = new TokenVesting(msg.sender, vestingStartTime, vestingStartTime, vestingDuration, false);
+      vesting[msg.sender] = new TokenVesting(msg.sender, vestingStartTime, 0, vestingDuration, false);
       require(token.mint(msg.sender, _withdrawNow));
       LogLSTsWithdrawn(msg.sender, _withdrawNow);
       require(token.mint(address(vesting[msg.sender]), _vestedPortion));
-      LogTimeVestingLSTsWithdrawn(msg.sender, _vestedPortion, vestingStartTime, vestingStartTime, vestingDuration);
+      LogTimeVestingLSTsWithdrawn(address(vesting[msg.sender]), _vestedPortion, vestingStartTime, 0, vestingDuration);
     }
   }
 
   // member function that can be called to release vested tokens periodically
-  function releaseVestedTokens(address beneficiary) public {
-    require(beneficiary != 0x0);
-
-    TokenVesting tokenVesting = vesting[beneficiary];
+  function releaseVestedTokens() public {
+    TokenVesting tokenVesting = vesting[msg.sender];
     tokenVesting.release(token);
   }
 

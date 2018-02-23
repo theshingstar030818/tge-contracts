@@ -153,7 +153,7 @@ contract("SimpleTGE", function(accounts) {
 
   it("should allow contributing with vesting and honor whitelist/blacklist", async function() {
     const initialFundsWalletBalance = await web3.eth.getBalance(await this.contract.fundsWallet());
-  
+
     for (var i = 0; i < validWhiteListAddresses.length; i++) {
       const address = validWhiteListAddresses[i];
       await this.contract.contributeAndVest({value: 0, from: address}).should.be.rejectedWith('revert');
@@ -165,7 +165,7 @@ contract("SimpleTGE", function(accounts) {
       assert.equal(contribution[1], 1);
 
       assert.equal(await this.contract.weiRaised(), i+1);
-      
+
       const newFundsWalletBalance = await web3.eth.getBalance(await this.contract.fundsWallet());
       const expectedNewFundsWalletBalance = initialFundsWalletBalance.plus(i+1);
       assert.equal(newFundsWalletBalance.String, expectedNewFundsWalletBalance.String);
@@ -206,7 +206,7 @@ contract("SimpleTGE", function(accounts) {
 
   it("should allow contributing without vesting and honor whitelist/blacklist", async function() {
     const initialFundsWalletBalance = await web3.eth.getBalance(await this.contract.fundsWallet());
-  
+
     for (var i = 0; i < validWhiteListAddresses.length; i++) {
       const address = validWhiteListAddresses[i];
       await this.contract.contributeAndVest({value: 0, from: address}).should.be.rejectedWith('revert');
@@ -218,7 +218,7 @@ contract("SimpleTGE", function(accounts) {
       assert.equal(contribution[1], 1);
 
       assert.equal(await this.contract.weiRaised(), i+1);
-      
+
       const newFundsWalletBalance = await web3.eth.getBalance(await this.contract.fundsWallet());
       const expectedNewFundsWalletBalance = initialFundsWalletBalance.plus(i+1);
       assert.equal(newFundsWalletBalance.String, expectedNewFundsWalletBalance.String);
@@ -289,7 +289,7 @@ contract("SimpleTGE", function(accounts) {
     await this.contract.contributeAndVest({value: 1, from: contributor});
     contributors0 = await this.contract.contributors(0);
     assert.equal(contributors0, contributor);
-    // Make sure the contributor only appears in the contributors array once    
+    // Make sure the contributor only appears in the contributors array once
     await this.contract.contributors(1).should.be.rejectedWith('invalid opcode');
 
     // Make sure the contributors balance is properly updated
@@ -302,13 +302,13 @@ contract("SimpleTGE", function(accounts) {
 
   it("should honor the individual cap", async function() {
     const contributor = validWhiteListAddresses[0];
-    
+
     await this.contract.contributeAndVest({value: individualCapInWei-1, from: contributor});
     let contribution = await this.contract.contributions(contributor);
     assert.equal(contribution[0], true);
     assert.equal(contribution[1], individualCapInWei-1);
     assert.equal(await this.contract.weiRaised(), individualCapInWei-1);
-    
+
     await this.contract.contributeAndVest({value: 1, from: contributor});
     contribution = await this.contract.contributions(contributor);
     assert.equal(contribution[0], true);
@@ -324,7 +324,7 @@ contract("SimpleTGE", function(accounts) {
 
   it("should not allow an individual who has never contributed to exceed the individualCapInWei", async function () {
     const contributor = validWhiteListAddresses[0];
-    
+
     await this.contract.contributeAndVest({value: individualCapInWei+1, from: contributor}).should.be.rejectedWith('revert');
     await this.contract.contributors(0).should.be.rejectedWith('invalid opcode');
     contribution = await this.contract.contributions(contributor);
@@ -363,7 +363,7 @@ contract("SimpleTGE", function(accounts) {
 
   it("should not allow the individualCapInWei to exceed the totalCapInWei", async function() {
     assert.equal(await this.contract.owner(), accounts[0]);
-  
+
     await this.contract.changeIndividualCapInWei(totalCapInWei+1, {from: accounts[0]}).should.be.rejectedWith('revert');
     assert.equal(await this.contract.individualCapInWei(), individualCapInWei);
   });
