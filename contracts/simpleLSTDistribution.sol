@@ -82,7 +82,6 @@ contract SimpleLSTDistribution is Ownable {
   function mintTokens(address beneficiary, uint256 tokens) public onlyOwner {
     require(beneficiary != 0x0);
     require(tokens > 0);
-
     require(token.mint(beneficiary, tokens));
     LogLSTsWithdrawn(beneficiary, tokens);
   }
@@ -128,9 +127,16 @@ contract SimpleLSTDistribution is Ownable {
   }
 
   // member function that can be called to release vested tokens periodically
-  function releaseVestedTokens() public {
-    TokenVesting tokenVesting = vesting[msg.sender];
+  function releaseVestedTokens(address beneficiary) public {
+    require(beneficiary != 0x0);
+
+    TokenVesting tokenVesting = vesting[beneficiary];
     tokenVesting.release(token);
+  }
+
+  // unpauseToken token for transfers
+  function unpauseToken() public onlyOwner {
+    token.unpause();
   }
 
 }

@@ -2,6 +2,13 @@ var SimpleLSTDistribution = artifacts.require("SimpleLSTDistribution");
 var SimplePreTGE = artifacts.require("SimplePreTGE");
 var SimpleTGE = artifacts.require("SimpleTGE");
 var LendroidSupportToken = artifacts.require("LendroidSupportToken");
+var TokenVesting = artifacts.require("zeppelin-solidity/contracts/token/ERC20/TokenVesting");
+
+
+
+function Billion(x) {
+  return x * 1000 * 1000 * 1000;
+};
 
 const BigNumber = web3.BigNumber;
 require('chai')
@@ -69,13 +76,8 @@ should mint exactly 90% of the allocated tokens to the contributors tokenvesting
 
 should compute vesting decision if vesting decision is true in either of the pre-TGE and TGE contracts
 should allow withdrawal from the tokenvesting contract according to the release schedule
-
----
-All withdrawals are called by msg.sender only
-----
-should allow only the respective contributor to access their tokenvesting withdrawal
-should only allow the respective contributor to run withdrawal function for themselves
-should only allow the respective contributor to run release function in the tokenvesting contract for themselves
+withdrawal function is called by msg.sender only
+any address can request the vested withdrawal, but the amount only is released to the vested address.
 
 */
 
@@ -173,11 +175,14 @@ contract("SimpleLSTDistribution", function(accounts) {
     }
 
     const _useVestingStartTime = startTime + 60;
-    this.contract = await SimpleLSTDistribution.new(this.SimplePreTGEContract.address, this.SimpleTGEContract.address,  _vestingBonusMultiplier, _vestingDuration, _useVestingStartTime);
+    this.contract = await SimpleLSTDistribution.new(this.SimplePreTGEContract.address, this.SimpleTGEContract.address,  _vestingBonusMultiplier, _vestingDuration, _useVestingStartTime, {from:ownerAddress});
 
     this.token = LendroidSupportToken.at(await this.contract.token());
 
+
   });
+
+
 
 
   it("should not deploy the contract if _SimplePreTGEAddress is not a valid address", async function() {
@@ -218,7 +223,22 @@ contract("SimpleLSTDistribution", function(accounts) {
   });
 
 
+  it("should create the token contract properly", async function() {
+    assert.equal(await this.token.MAX_SUPPLY(), Billion(12)*Math.pow(10, 18), "LST should be created with 12 billion max supply, with 18 decimals");
+  });
 
+  it("should mint tokens (no vesting) to any address, but by the owner only", async function() {
+
+    assert.equal(await this.contract.owner(),ownerAddress,"should have the correct owner - SimpleLSTDistribution");
+
+    await this.contract.mintTokens(accounts[2], 100, {from:ownerAddress});
+    let tokenBalance = await this.token.balanceOf(accounts[2]);
+    assert.equal(tokenBalance.toNumber(), 100  ,"should receive minted tokens" );
+    assert.equal(await this.token.totalSupply(), 100, "The total supply should be incremented by number of minted tokens");
+    // only owner should be able to mint
+    await this.contract.mintTokens(accounts[2], 100, {from:accounts[5]}).should.be.rejectedWith('revert');
+
+  });
 
   it("should reject withdrawal request if TRS is still active", async function() {
     await this.SimplePreTGEContract.disableAllocationModificationsForEver({from:ownerAddress});
@@ -314,7 +334,7 @@ contract("SimpleLSTDistribution", function(accounts) {
     const tokenBalance = await this.token.balanceOf(contributorPreTGENotVesting);
     assert.equal(tokenBalance.toNumber(), LSTRatePerWEI.toNumber() * (allocation[1].toNumber()));
 
-    await this.contract.withdraw({from:contributorPreTGENotVesting}).should.be.rejectedWith('revert');;
+    await this.contract.withdraw({from:contributorPreTGENotVesting}).should.be.rejectedWith('revert');
 
   });
 
@@ -442,6 +462,33 @@ contract("SimpleLSTDistribution", function(accounts) {
 
     });
 
+    it("should fail to release from the tokenvesting if the user has not vested", async function() {
+
+      await this.SimplePreTGEContract.disableAllocationModificationsForEver({from:ownerAddress});
+      assert.equal(await this.SimplePreTGEContract.allocationsLocked(), true ,'Allocations should be disabled in pre-TGE');
+      let contributionInPreTGE = await this.SimplePreTGEContract.contributions(contributorPreTGENotVesting);
+      let contributionInTGE = await this.SimpleTGEContract.contributions(contributorPreTGENotVesting);
+      assert.equal(contributionInPreTGE[0], false);
+      assert.equal(contributionInPreTGE[1], 5000000);
+      assert.equal(contributionInTGE[0], false);
+      assert.equal(contributionInTGE[1], 0);
+      await increaseTime(duration.days(6));
+      await advanceBlock();
+      const TRSEndsAT = parseInt(await this.SimpleTGEContract.publicTGEEndBlockTimeStamp()) + parseInt(await this.SimpleTGEContract.TRSOffset());
+      assert.isAbove(blockTimeStamp(),TRSEndsAT);
+      await this.contract.withdraw({from:contributorPreTGENotVesting});
+      let allocation = await this.contract.allocations(contributorPreTGENotVesting);
+      assert.equal(allocation[0], false);
+      assert.equal(allocation[1], 5000000);
+      assert.equal(allocation[3], true,"should properly save the hasWithdrawn parameter for the contributor in allocations dict");
+      const LSTRatePerWEI = await this.contract.LSTRatePerWEI();
+      const tokenBalance = await this.token.balanceOf(contributorPreTGENotVesting);
+      assert.equal(tokenBalance.toNumber(), LSTRatePerWEI.toNumber() * (allocation[1].toNumber()));
+      let contributorVestingContract = await this.contract.vesting(contributorPreTGENotVesting);
+      assert.equal(contributorVestingContract.address,undefined,'No vesting contract for non-vested participants');
+      await this.contract.releaseVestedTokens({from:contributorPreTGENotVesting}).should.be.rejected;
+
+    });
 
     it("should allow withdrawal from the tokenvesting contract according to the release schedule", async function() {
 
@@ -474,23 +521,65 @@ contract("SimpleLSTDistribution", function(accounts) {
 
       // trying double withdrawal should fail
       await this.contract.withdraw({from:contributorPreTGEVesting}).should.be.rejectedWith('revert');
+      var vesting_contract = TokenVesting.at(await this.contract.vesting(contributorPreTGEVesting));
 
-      await increaseTime(duration.seconds(_vestingDuration+100));
-      await advanceBlock();
+      var vestingStartTime = await vesting_contract.start();
+      if (vestingStartTime > blockTimeStamp()){
+        await increaseTime(duration.seconds(vestingStartTime - blockTimeStamp()));
+        await advanceBlock();
+      }
 
-      await this.contract.releaseVestedTokens({from:contributorPreTGEVesting});
+      // move to 6 months into the vesting
+      if (blockTimeStamp() >= vestingStartTime){
+        await increaseTime(duration.seconds( (_vestingDuration / 2) - (blockTimeStamp()-vestingStartTime) ));
+        await advanceBlock();
+      }
 
+      var ratioOfVestingDurationPass = ((blockTimeStamp() - vestingStartTime)/(_vestingDuration)).toFixed(2);
+
+      var releasableAmount = await vesting_contract.releasableAmount(this.token.address,{from:contributorPreTGEVesting});
+
+      assert.isAbove(releasableAmount.toNumber(),0);
+      assert.isBelow(releasableAmount.toNumber(),(allocation[1] * LSTRatePerWEI * _vestingBonusMultiplier * (0.9) / vestingBonusMultiplierPrecision));
+
+      //releasableAmount.toNumber()
+
+      // LST still paused.
+      await this.contract.releaseVestedTokens(contributorPreTGEVesting,{from:ownerAddress}).should.be.rejectedWith('revert');
+
+      assert.equal(await this.token.owner(),this.contract.address);
+
+      await this.contract.unpauseToken({from:ownerAddress});
+
+      // any address is able to request release for a particular address, but the balance are transferred only to the beneficiary
+      await this.contract.releaseVestedTokens(contributorPreTGEVesting,{from:contributorPreTGENotVestingTGEVesting});
 
       tokenBalance = await this.token.balanceOf(contributorPreTGEVesting);
       vestingcontractTokenBalance = await this.token.balanceOf(contributorVestingContract);
 
-      let contributerTokenBalanceShouldBe = (allocation[1] * LSTRatePerWEI * _vestingBonusMultiplier * (1) / vestingBonusMultiplierPrecision);
-      let contributerVestedBalanceShouldBe = (allocation[1] * LSTRatePerWEI * _vestingBonusMultiplier * (0) / vestingBonusMultiplierPrecision);
-
-      assert.equal(tokenBalance.toNumber(), contributerTokenBalanceShouldBe,"12 months in contributor runs release")
-      assert.equal(vestingcontractTokenBalance.toNumber(), contributerVestedBalanceShouldBe,"12 months in there should be this much left in the vesting contract")
+      assert.equal(tokenBalance.toNumber() +  vestingcontractTokenBalance.toNumber(),(allocation[1] * LSTRatePerWEI * _vestingBonusMultiplier / vestingBonusMultiplierPrecision),"The total balance should be equal to the allocation" );
 
 
+      assert.isBelow( vestingcontractTokenBalance.toNumber(),(allocation[1] * LSTRatePerWEI * _vestingBonusMultiplier * (0.9) / vestingBonusMultiplierPrecision),"The tokens left in the vesting contract should be less than 90% at this point");
+
+
+
+      // move to 12+ months into the vesting
+      if (blockTimeStamp() >= vestingStartTime){
+        await increaseTime(duration.seconds((_vestingDuration / 2)+200  ));
+        await advanceBlock();
+      }
+
+      // any address is able to request release for a particular address, but the balance are transferred only to the beneficiary
+      await this.contract.releaseVestedTokens(contributorPreTGEVesting,{from:contributorPreTGENotVestingTGEVesting});
+
+      tokenBalance = await this.token.balanceOf(contributorPreTGEVesting);
+      vestingcontractTokenBalance = await this.token.balanceOf(contributorVestingContract);
+
+      assert.equal(tokenBalance.toNumber() +  vestingcontractTokenBalance.toNumber(),(allocation[1] * LSTRatePerWEI * _vestingBonusMultiplier / vestingBonusMultiplierPrecision),"The total balance should be equal to the allocation" );
+
+      assert.equal(vestingcontractTokenBalance.toNumber(), 0, 'all tokens should be withdrawn after 12 months');
+      assert.equal(tokenBalance.toNumber(), (allocation[1] * LSTRatePerWEI * _vestingBonusMultiplier / vestingBonusMultiplierPrecision), 'all tokens should now be in the address');
 
     });
 
