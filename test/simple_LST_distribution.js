@@ -231,6 +231,11 @@ contract("SimpleLSTDistribution", function(accounts) {
 
     assert.equal(await this.contract.owner(),ownerAddress,"should have the correct owner - SimpleLSTDistribution");
 
+    // invalid address cannot be minted to.
+    await this.contract.mintTokens(0, 100, {from:ownerAddress}).should.be.rejectedWith('revert');
+    // cannot mint 0 tokens to an address.
+    await this.contract.mintTokens(accounts[2], 0, {from:ownerAddress}).should.be.rejectedWith('revert');
+
     await this.contract.mintTokens(accounts[2], 100, {from:ownerAddress});
     let tokenBalance = await this.token.balanceOf(accounts[2]);
     assert.equal(tokenBalance.toNumber(), 100  ,"should receive minted tokens" );
@@ -462,6 +467,11 @@ contract("SimpleLSTDistribution", function(accounts) {
 
     });
 
+    it("should fail to process release if the beneficiary address is invalid", async function() {
+        await this.contract.releaseVestedTokens(0,{from:contributorPreTGENotVesting}).should.be.rejectedWith('revert');
+    });
+
+
     it("should fail to release from the tokenvesting if the user has not vested", async function() {
 
       await this.SimplePreTGEContract.disableAllocationModificationsForEver({from:ownerAddress});
@@ -486,9 +496,21 @@ contract("SimpleLSTDistribution", function(accounts) {
       assert.equal(tokenBalance.toNumber(), LSTRatePerWEI.toNumber() * (allocation[1].toNumber()));
       let contributorVestingContract = await this.contract.vesting(contributorPreTGENotVesting);
       assert.equal(contributorVestingContract.address,undefined,'No vesting contract for non-vested participants');
-      await this.contract.releaseVestedTokens({from:contributorPreTGENotVesting}).should.be.rejected;
+      await this.contract.releaseVestedTokens(contributorPreTGENotVesting,{from:contributorPreTGENotVesting}).should.be.rejected;
 
     });
+
+
+    it("should only allow the owner to unpause the token", async function() {
+
+      assert.equal(await this.token.paused(),true);
+      await this.contract.unpauseToken({from:contributorPreTGEVesting}).should.be.rejectedWith('revert');
+      await this.contract.unpauseToken({from:ownerAddress});
+      assert.equal(await this.token.paused(),false);
+
+    });
+
+
 
     it("should allow withdrawal from the tokenvesting contract according to the release schedule", async function() {
 
