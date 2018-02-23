@@ -227,23 +227,32 @@ contract("SimpleLSTDistribution", function(accounts) {
     assert.equal(await this.token.MAX_SUPPLY(), Billion(12)*Math.pow(10, 18), "LST should be created with 12 billion max supply, with 18 decimals");
   });
 
-  it("should mint tokens (no vesting) to any address, but by the owner only", async function() {
 
+
+  it("should mint tokens (no vesting) to any address, but by the owner only", async function() {
+    var MAX_SUPPLY = await this.token.MAX_SUPPLY()
     assert.equal(await this.contract.owner(),ownerAddress,"should have the correct owner - SimpleLSTDistribution");
 
+    // only owner should be able to mint
+    await this.contract.mintTokens(accounts[2], 100, {from:accounts[5]}).should.be.rejectedWith('revert');
     // invalid address cannot be minted to.
     await this.contract.mintTokens(0, 100, {from:ownerAddress}).should.be.rejectedWith('revert');
     // cannot mint 0 tokens to an address.
     await this.contract.mintTokens(accounts[2], 0, {from:ownerAddress}).should.be.rejectedWith('revert');
 
-    await this.contract.mintTokens(accounts[2], 100, {from:ownerAddress});
+    // owners should be able to mint tokens to an address.
+    await this.contract.mintTokens(accounts[2], 10000, {from:ownerAddress});
+
     let tokenBalance = await this.token.balanceOf(accounts[2]);
-    assert.equal(tokenBalance.toNumber(), 100  ,"should receive minted tokens" );
-    assert.equal(await this.token.totalSupply(), 100, "The total supply should be incremented by number of minted tokens");
-    // only owner should be able to mint
-    await this.contract.mintTokens(accounts[2], 100, {from:accounts[5]}).should.be.rejectedWith('revert');
+    assert.equal(tokenBalance.toNumber(), 10000  ,"should receive minted tokens" );
+    assert.equal(await this.token.totalSupply(), 10000, "The total supply should be incremented by number of minted tokens");
+
+    // cannot mint more than MAX_SUPPLY tokens to an address.
+    await this.contract.mintTokens(accounts[2], Billion(12)*Math.pow(10, 18), {from:ownerAddress}).should.be.rejectedWith('revert');
+
 
   });
+
 
   it("should reject withdrawal request if TRS is still active", async function() {
     await this.SimplePreTGEContract.disableAllocationModificationsForEver({from:ownerAddress});

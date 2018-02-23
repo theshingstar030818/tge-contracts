@@ -18,4 +18,14 @@ contract LendroidSupportToken is MintableToken, PausableToken {
     paused = true;
   }
 
+
+  /**
+   * @dev totalSupply is set via the minting process
+   */
+
+  function mint(address to, uint256 amount) onlyOwner public returns (bool) {
+    require(totalSupply_ + amount <= MAX_SUPPLY);
+    return super.mint(to, amount);
+  }
+
 }
