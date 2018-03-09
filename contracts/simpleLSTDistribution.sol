@@ -59,7 +59,8 @@ contract SimpleLSTDistribution is Ownable {
       address _SimpleTGEAddress,
       uint256 _vestingBonusMultiplier,
       uint256 _vestingDuration,
-      uint256 _vestingStartTime
+      uint256 _vestingStartTime,
+      address _LSTAddress
     ) public {
 
     require(_SimplePreTGEAddress != address(0));
@@ -69,7 +70,8 @@ contract SimpleLSTDistribution is Ownable {
     require(_vestingDuration > 0);
     require(_vestingStartTime > block.timestamp);
 
-    token = new LendroidSupportToken();
+    token = LendroidSupportToken(_LSTAddress);
+    // token = new LendroidSupportToken();
 
     SimplePreTGEContract = SimplePreTGE(_SimplePreTGEAddress);
     SimpleTGEContract = SimpleTGE(_SimpleTGEAddress);
