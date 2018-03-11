@@ -84,6 +84,7 @@ contract simpleSyndicatorLSTDistribution is Ownable {
     allocations[msg.sender].shouldVest = _shouldVest;
     uint256 _lstAllocated;
     if (!_shouldVest) {
+      _lstAllocated = _LSTPurchased;
       allocations[msg.sender].LSTAllocated = _LSTPurchased;
 
       token.safeTransfer(msg.sender, _lstAllocated);
