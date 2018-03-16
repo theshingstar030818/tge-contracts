@@ -11,9 +11,9 @@ import "./LendroidSupportToken.sol";
  * @title SimpleSyndicatorLSTDistribution
  * @dev SimpleSyndicatorLSTDistribution contract provides interface for the contributor to withdraw their allocations / initiate the vesting contract
  */
-contract simpleSyndicatorLSTDistribution is Ownable {
+ contract SimpleSyndicatorLSTDistribution is Ownable {
   using SafeMath for uint256;
-  using SafeERC20 for LendroidSupportToken;
+//   using SafeERC20 for LendroidSupportToken;
 
   SimpleSyndicatorPreTGE public SimpleSyndicatorPreTGEContract;
   LendroidSupportToken public token;
@@ -80,7 +80,7 @@ contract simpleSyndicatorLSTDistribution is Ownable {
   function withdraw() external {
     require(!allocations[msg.sender].hasWithdrawn);
     // allocations should be locked in the pre-TGE
-    require(withdrawalActivated);
+    assert(withdrawalActivated);
     bool _shouldVest;
     uint256 _LSTPurchased;
     (_shouldVest, _LSTPurchased) = SimpleSyndicatorPreTGEContract.contributions(msg.sender);
@@ -91,7 +91,7 @@ contract simpleSyndicatorLSTDistribution is Ownable {
       _lstAllocated = _LSTPurchased;
       allocations[msg.sender].LSTAllocated = _LSTPurchased;
 
-      token.safeTransfer(msg.sender, _lstAllocated);
+      assert(token.transfer(msg.sender, _lstAllocated));
       //require(token.mint(msg.sender, _lstAllocated));
 
       LogLSTsWithdrawn(msg.sender, _lstAllocated);
@@ -103,10 +103,11 @@ contract simpleSyndicatorLSTDistribution is Ownable {
       uint256 _vestedPortion = _lstAllocated.sub(_withdrawNow);
       vesting[msg.sender] = new TokenVesting(msg.sender, vestingStartTime, 0, vestingDuration, false);
 
-      token.safeTransfer(msg.sender, _withdrawNow);
+      assert(token.transfer(msg.sender, _withdrawNow));
       //require(token.mint(msg.sender, _withdrawNow));
       LogLSTsWithdrawn(msg.sender, _withdrawNow);
       //require(token.mint(address(vesting[msg.sender]), _vestedPortion));
+      assert(token.transfer(address(vesting[msg.sender]), _vestedPortion));
       LogTimeVestingLSTsWithdrawn(address(vesting[msg.sender]), _vestedPortion, vestingStartTime, 0, vestingDuration);
 
     }
@@ -121,7 +122,7 @@ contract simpleSyndicatorLSTDistribution is Ownable {
   }
 
   function escapeHatch() onlyOwner external {
-    token.safeTransfer(owner, token.balanceOf(this));
+    assert(token.transfer(owner, token.balanceOf(this)));
   }
 
   function activateWithdrawal() onlyOwner external {

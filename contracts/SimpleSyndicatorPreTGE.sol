@@ -4,17 +4,11 @@ import "zeppelin-solidity/contracts/ownership/Ownable.sol";
 
 contract SimpleSyndicatorPreTGE is Ownable {
 
-  bool public allocationsLocked;
-
   struct Contribution {
     bool hasVested;
     uint256 LSTPurchased;
   }
   mapping (address => Contribution)  public contributions;
-
-  function disableAllocationModificationsForEver() external onlyOwner returns(bool) {
-    allocationsLocked = true;
-  }
 
   function reserveTokensForAddress(address addr_, uint256 LSTPurchased_, bool vestingDecision_) onlyOwner external returns(bool) {
     contributions[addr_].LSTPurchased = LSTPurchased_;
@@ -23,7 +17,6 @@ contract SimpleSyndicatorPreTGE is Ownable {
   }
 
   function bulkReserveTokensForAddresses(address[] addrs, uint256[] LSTPurchases, bool[] _vestingDecisions) onlyOwner external returns(bool) {
-    require(!allocationsLocked);
     require((addrs.length == LSTPurchases.length) && (addrs.length == _vestingDecisions.length));
     for (uint i=0; i<addrs.length; i++) {
       require(contributions[addrs[i]].LSTPurchased == 0);
