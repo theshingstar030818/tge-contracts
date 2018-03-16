@@ -24,6 +24,8 @@ contract simpleSyndicatorLSTDistribution is Ownable {
   uint256 public vestingDuration;
   uint256 public vestingStartTime;
 
+  bool public withdrawalActivated = false;
+
   struct allocation {
     bool shouldVest;
     uint256 LSTAllocated;
@@ -78,7 +80,7 @@ contract simpleSyndicatorLSTDistribution is Ownable {
   function withdraw() external {
     require(!allocations[msg.sender].hasWithdrawn);
     // allocations should be locked in the pre-TGE
-    require(SimpleSyndicatorPreTGEContract.allocationsLocked());
+    require(withdrawalActivated);
     bool _shouldVest;
     uint256 _LSTPurchased;
     (_shouldVest, _LSTPurchased) = SimpleSyndicatorPreTGEContract.contributions(msg.sender);
@@ -122,5 +124,8 @@ contract simpleSyndicatorLSTDistribution is Ownable {
     token.safeTransfer(owner, token.balanceOf(this));
   }
 
+  function activateWithdrawal() onlyOwner external {
+    withdrawalActivated = true;
+  }
 
 }
