@@ -5,3 +5,6 @@
 /coverage
 coverage.json
 .solcover.js
+*.DS_*
+*node_modules*
+
