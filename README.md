@@ -1,1 +1,28 @@
 # Automation/Smart Contract : for distributing Lendroid tokens from a csv file
+
+## Open truffle.js and replace its content with the following code:
+
+	module.exports = {
+		networks: {
+		 development: {
+				host: 'localhost',
+				port: 8545,
+				network_id: '*', // Match any network id
+				gas: 3500000,
+			}, 
+		 ropsten: {
+				host: 'localhost',
+				port: 8545,
+				network_id: '3', // Match any network id
+				gas: 3500000,
+				gasPrice: 50000000000
+			},
+		},
+		solc: {
+			optimizer: {
+				enabled: true,
+				runs: 200,
+			},
+		},
+	};
+	
