@@ -1,6 +1,7 @@
 # Automation/Smart Contract : for distributing Lendroid tokens from a csv file
 
-## Open truffle.js and replace its content with the following code:
+
+Open truffle.js and replace its content with the following code:
 
 	module.exports = {
 		networks: {
@@ -25,4 +26,16 @@
 			},
 		},
 	};
-	
+
+The above will allow us to run truffle migrate --network ropsten to deploy the contracts to Ropsten testnet.
+
+
+
+
+
+
+
+
+
+Reference : https://hackernoon.com/how-to-script-an-automatic-token-airdrop-for-40k-subscribers-e40c8b1a02c6
+
